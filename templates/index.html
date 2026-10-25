@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bilibili Dubbing Studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    body {
+      background-color: #090d16;
+      color: #f1f5f9;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .panel {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 16px;
+    }
+    .sub-panel {
+      background: #0b0f19;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+    }
+    .step-tab {
+      transition: all 0.18s ease;
+    }
+    .step-tab.active {
+      background: #1e293b;
+      border-color: #38bdf8;
+      color: #ffffff;
+    }
+    .step-tab.active .step-num {
+      background: #0284c7;
+      color: #ffffff;
+    }
+    .lib-subtab.active {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #38bdf8;
+    }
+    textarea::-webkit-scrollbar, div::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    textarea::-webkit-scrollbar-thumb, div::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-sky-500 selection:text-white">
+
+  <!-- TOP HEADER & NAVIGATION -->
+  <header class="border-b border-slate-800/80 bg-[#0b0f19]/90 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
+      <!-- Brand -->
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-sky-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
+          ▶
+        </div>
+        <div>
+          <h1 class="text-sm font-bold text-white leading-tight">Bilibili AI Studio</h1>
+          <p class="text-[11px] text-slate-400">Tách Sub • Dịch AI • Lồng Tiếng</p>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs (Steps 1-3 + Library) -->
+      <nav class="flex items-center gap-1.5 sm:gap-2">
+        <button onclick="switchStep(1)" id="tabStep1" class="step-tab active flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-800 text-xs font-semibold text-slate-400 hover:text-white">
+          <span class="step-num w-5 h-5 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[11px] font-bold">1</span>
+          <span>Chọn Video</span>
+        </button>
+
+        <span class="text-slate-700 hidden sm:inline">→</span>
+
+        <button onclick="switchStep(2)" id="tabStep2" class="step-tab flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-800 text-xs font-semibold text-slate-400 hover:text-white">
+          <span class="step-num w-5 h-5 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[11px] font-bold">2</span>
+          <span>Phụ Đề & Dịch</span>
+        </button>
+
+        <span class="text-slate-700 hidden sm:inline">→</span>
+
+        <button onclick="switchStep(3)" id="tabStep3" class="step-tab flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-800 text-xs font-semibold text-slate-400 hover:text-white">
+          <span class="step-num w-5 h-5 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[11px] font-bold">3</span>
+          <span>Lồng Tiếng & Xuất</span>
+        </button>
+
+        <div class="h-5 w-[1px] bg-slate-800 mx-1"></div>
+
+        <button onclick="switchStep(4)" id="tabStep4" class="step-tab flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-800 text-xs font-semibold text-slate-400 hover:text-white">
+          <span>📚 Thư Viện</span>
+          <span id="libTotalBadge" class="px-1.5 py-0.5 text-[10px] rounded-full bg-slate-800 text-sky-400">0</span>
+        </button>
+      </nav>
+
+      <!-- Current File Indicator -->
+      <div class="hidden lg:flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg text-xs">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span class="text-slate-400">Đang chọn:</span>
+        <span id="currentVideoBadge" class="text-slate-200 font-medium truncate max-w-[170px]">Chưa chọn</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN WORKSPACE: 2 COLUMNS (LEFT = ACTIVE VIEW, RIGHT = UNIFIED PLAYER) -->
+  <main class="max-w-7xl w-full mx-auto px-6 py-6 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+    <!-- LEFT COLUMN (7 COLS): ACTIVE WORKSPACE -->
+    <div class="lg:col-span-7">
+
+      <!-- ==================== STEP 1: CHỌN HOẶC TẢI VIDEO ==================== -->
+      <section id="viewStep1" class="panel p-6 space-y-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-bold text-white">Bước 1: Chọn nguồn Video</h2>
+            <p class="text-xs text-slate-400 mt-0.5">Chọn nhanh video có sẵn trong máy hoặc tải tập mới từ Bilibili.</p>
+          </div>
+          <button onclick="switchStep(4)" class="text-xs text-sky-400 hover:text-sky-300 font-medium">
+            📚 Mở Thư Viện quản lý file →
+          </button>
+        </div>
+
+        <!-- Chọn nhanh video đã có trong máy -->
+        <div class="sub-panel p-4 space-y-3">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-semibold text-slate-200">📂 Video có sẵn trong máy</label>
+            <button onclick="loadLocalFiles()" class="text-xs text-sky-400 hover:text-sky-300">Làm mới</button>
+          </div>
+          <select
+            id="localVideoSelect"
+            onchange="onSelectLocalVideo()"
+            class="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500"
+          ></select>
+        </div>
+
+        <!-- Hoặc tải từ Bilibili -->
+        <div class="sub-panel p-4 space-y-4">
+          <label class="block text-xs font-semibold text-slate-200">🌐 Tải video mới từ Bilibili</label>
+          <div class="flex gap-2">
+            <input
+              id="biliUrlInput"
+              type="text"
+              value="https://www.bilibili.com/en/video/BV1hu7g6ZENZ/"
+              placeholder="Dán link Bilibili hoặc mã BV..."
+              class="flex-1 bg-slate-900 border border-slate-700/80 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-sky-500"
+            />
+            <button
+              onclick="analyzeBilibili()"
+              class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-medium px-4 py-2 rounded-xl text-xs transition whitespace-nowrap"
+            >
+              Lấy danh sách tập
+            </button>
+          </div>
+
+          <div id="biliInfoPanel" class="hidden pt-3 border-t border-slate-800/80 space-y-3">
+            <div>
+              <div id="biliTitle" class="text-xs font-semibold text-white truncate"></div>
+              <div id="biliAuthor" class="text-[11px] text-slate-400 mt-0.5"></div>
+            </div>
+            <div class="grid grid-cols-3 gap-2.5">
+              <div class="col-span-2">
+                <select id="biliPageSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"></select>
+              </div>
+              <div>
+                <select id="biliQualitySelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
+                  <option value="80">1080P</option>
+                  <option value="64" selected>720P (Chuẩn)</option>
+                  <option value="32">480P (Nhanh)</option>
+                </select>
+              </div>
+            </div>
+            <button
+              onclick="downloadBilibili()"
+              class="w-full bg-sky-600 hover:bg-sky-500 text-white font-semibold py-2.5 rounded-xl text-xs transition"
+            >
+              ⬇️ Tải Tập Này Về Máy
+            </button>
+          </div>
+        </div>
+
+        <div class="pt-2 flex justify-end">
+          <button
+            onclick="switchStep(2)"
+            class="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition flex items-center gap-2"
+          >
+            <span>Tiếp tục: Tách & Dịch Phụ Đề</span>
+            <span>→</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ==================== STEP 2: TÁCH & DỊCH PHỤ ĐỀ ==================== -->
+      <section id="viewStep2" class="panel p-6 space-y-5 hidden">
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-800">
+          <div>
+            <h2 class="text-base font-bold text-white">Bước 2: Tách & Dịch Phụ Đề</h2>
+            <p class="text-xs text-slate-400 mt-0.5">Tách lời thoại gốc, copy sang ChatGPT/DeepSeek dịch hoặc sửa trực tiếp tại đây.</p>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <select id="whisperModelSelect" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300">
+              <option value="base" selected>Model: Base</option>
+              <option value="tiny">Model: Tiny</option>
+              <option value="small">Model: Small</option>
+            </select>
+            <input id="chkSeparateExtract" type="checkbox" checked class="hidden" />
+            <button
+              onclick="extractChineseSub()"
+              class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-semibold px-3.5 py-1.5 rounded-lg text-xs transition"
+            >
+              🎙️ Tách Sub Gốc
+            </button>
+          </div>
+        </div>
+
+        <!-- Thanh công cụ dịch & Lưu trực tiếp -->
+        <div class="sub-panel p-3 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              onclick="copyWithPromptForAIWeb()"
+              class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold px-3 py-1.5 rounded-lg text-xs transition"
+            >
+              📋 1. Copy Sub + Prompt
+            </button>
+            <button
+              onclick="pasteFromClipboardToVi()"
+              class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg text-xs transition"
+            >
+              📥 2. Dán Bản Dịch
+            </button>
+            <button
+              onclick="autoTranslateSub('google')"
+              class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-400 font-medium px-3 py-1.5 rounded-lg text-xs transition"
+            >
+              ⚡ Dịch Tự Động
+            </button>
+          </div>
+
+          <button
+            onclick="saveCurrentSubPair()"
+            class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3.5 py-1.5 rounded-lg text-xs transition"
+          >
+            💾 Lưu Phụ Đề
+          </button>
+        </div>
+
+        <!-- 2 Cột Soạn Phụ Đề -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="space-y-2">
+            <div class="flex items-center justify-between px-1">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold text-slate-300">Tiếng Trung (Gốc)</span>
+                <span id="zhLineCount" class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">0 câu</span>
+              </div>
+              <button onclick="downloadTextFile('zh')" class="text-[11px] text-slate-400 hover:text-white">Tải .srt</button>
+            </div>
+            <textarea
+              id="zhSrtBox"
+              oninput="updateLineCounts()"
+              rows="14"
+              placeholder="Chưa có phụ đề gốc. Hãy bấm 'Tách Sub Gốc'..."
+              class="mono w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-xs text-slate-300 focus:outline-none focus:border-sky-500 leading-relaxed resize-none"
+            ></textarea>
+          </div>
+
+          <div class="space-y-2">
+            <div class="flex items-center justify-between px-1">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold text-sky-400">Tiếng Việt (Để đọc)</span>
+                <span id="viLineCount" class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">0 câu</span>
+              </div>
+              <div class="flex items-center gap-2.5">
+                <label class="text-[11px] text-slate-400 hover:text-white cursor-pointer">
+                  Nhập file
+                  <input type="file" accept=".srt,.txt" class="hidden" onchange="importViSrtFile(event)" />
+                </label>
+                <button onclick="downloadTextFile('vi')" class="text-[11px] text-slate-400 hover:text-white">Tải .srt</button>
+              </div>
+            </div>
+            <textarea
+              id="viSrtBox"
+              oninput="updateLineCounts()"
+              rows="14"
+              placeholder="Dán phụ đề tiếng Việt đã dịch vào đây. Bạn có thể sửa trực tiếp rồi bấm 'Lưu Phụ Đề'..."
+              class="mono w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-sky-500 leading-relaxed resize-none"
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="pt-2 flex items-center justify-between">
+          <button onclick="switchStep(1)" class="text-xs text-slate-400 hover:text-white px-3 py-2">
+            ← Quay lại Bước 1
+          </button>
+          <button
+            onclick="switchStep(3)"
+            class="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition flex items-center gap-2"
+          >
+            <span>Tiếp tục: Cấu hình Đọc & Xuất Video</span>
+            <span>→</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ==================== STEP 3: LỒNG TIẾNG & XUẤT VIDEO ==================== -->
+      <section id="viewStep3" class="panel p-6 space-y-5 hidden">
+        <div>
+          <h2 class="text-base font-bold text-white">Bước 3: Lồng Tiếng & Xuất Video</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Chọn giọng đọc, âm lượng nhạc nền và đóng dấu logo cá nhân.</p>
+        </div>
+
+        <!-- 1. Giọng đọc -->
+        <div class="sub-panel p-4 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-200">🎙️ Giọng đọc AI</span>
+            <button onclick="previewVoice()" class="text-xs text-sky-400 hover:text-sky-300 font-medium">
+              🔊 Nghe thử giọng
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Người đọc</label>
+              <select id="voiceSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
+                <option value="vi-VN-NamMinhNeural" selected>Nam Minh (Nam)</option>
+                <option value="vi-VN-HoaiMyNeural">Hoài My (Nữ)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Tốc độ</label>
+              <select id="rateSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
+                <option value="-5%">Hơi chậm (-5%)</option>
+                <option value="+0%" selected>Chuẩn (+0%)</option>
+                <option value="+5%">Hơi nhanh (+5%)</option>
+                <option value="+10%">Nhanh (+10%)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Tông giọng</label>
+              <select id="pitchSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
+                <option value="-3Hz">Trầm (-3Hz)</option>
+                <option value="+0Hz" selected>Tự nhiên (+0Hz)</option>
+                <option value="+2Hz">Sáng (+2Hz)</option>
+              </select>
+            </div>
+          </div>
+          <audio id="voicePreviewPlayer" controls class="hidden w-full h-8 mt-2"></audio>
+        </div>
+
+        <!-- 2. Nhạc nền & Phụ đề -->
+        <div class="sub-panel p-4 space-y-3">
+          <span class="text-xs font-semibold text-slate-200 block">🎶 Nhạc nền & Phụ đề trên phim</span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+            <div>
+              <div class="flex justify-between text-xs mb-1.5">
+                <span class="text-slate-400">Âm lượng nhạc nền (BGM)</span>
+                <span id="bgmVolLabel" class="text-white font-semibold">25%</span>
+              </div>
+              <input
+                id="bgmVolSlider"
+                type="range"
+                min="0"
+                max="0.8"
+                step="0.05"
+                value="0.25"
+                oninput="document.getElementById('bgmVolLabel').innerText = Math.round(this.value * 100) + '%'"
+                class="w-full accent-sky-500"
+              />
+            </div>
+            <div class="space-y-2 text-xs">
+              <label class="flex items-center gap-2 text-slate-300 cursor-pointer">
+                <input id="chkSeparateDub" type="checkbox" checked class="accent-sky-500 rounded" />
+                <span>Lọc bỏ tiếng Trung gốc (Chỉ giữ nhạc nền)</span>
+              </label>
+              <label class="flex items-center gap-2 text-slate-300 cursor-pointer">
+                <input id="chkHardsub" type="checkbox" checked class="accent-sky-500 rounded" />
+                <span>Hiển thị phụ đề Tiếng Việt trên video</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Logo Cá Nhân -->
+        <div class="sub-panel p-4 space-y-3">
+          <span class="text-xs font-semibold text-slate-200 block">🏷️ Chèn Logo kênh (Đè logo Bilibili)</span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Logo đang dùng</label>
+              <select id="logoSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
+                <option value="">-- Không chèn Logo --</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Vị trí</label>
+              <select id="logoPosSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
+                <option value="top-right" selected>Góc Trên Phải (Đè Bilibili)</option>
+                <option value="top-left">Góc Trên Trái</option>
+                <option value="bottom-right">Góc Dưới Phải</option>
+                <option value="bottom-left">Góc Dưới Trái</option>
+              </select>
+              <input id="logoWidthInput" type="hidden" value="150" />
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 pt-1">
+            <input
+              id="quickBadgeText"
+              type="text"
+              placeholder="Hoặc gõ tên kênh để tạo nhanh logo chữ..."
+              class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white"
+            />
+            <button
+              onclick="createTextBadge()"
+              class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap"
+            >
+              Tạo Logo Chữ
+            </button>
+            <label class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-xs cursor-pointer transition whitespace-nowrap">
+              Tải ảnh PNG
+              <input type="file" accept="image/*" class="hidden" onchange="uploadLogoFile(event)" />
+            </label>
+          </div>
+        </div>
+
+        <div class="pt-2 flex items-center justify-between gap-4">
+          <button onclick="switchStep(2)" class="text-xs text-slate-400 hover:text-white px-3 py-2">
+            ← Sửa lại Phụ đề
+          </button>
+          <button
+            onclick="startDubAndRender()"
+            class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl text-sm shadow-lg shadow-emerald-600/20 transition"
+          >
+            🎬 Bắt Đầu Lồng Tiếng & Xuất Video
+          </button>
+        </div>
+      </section>
+
+      <!-- ==================== STEP 4: THƯ VIỆN QUẢN LÝ (VIDEO ĐÃ TẢI, ĐÃ SUB, FILE SUB) ==================== -->
+      <section id="viewStep4" class="panel p-6 space-y-5 hidden">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-base font-bold text-white">📚 Thư Viện Quản Lý File</h2>
+            <p class="text-xs text-slate-400 mt-0.5">Xem, đổi tên, xoá hoặc chỉnh sửa trực tiếp các video đã tải, video đã lồng tiếng và file phụ đề (.srt).</p>
+          </div>
+          <button onclick="loadLocalFiles()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium">
+            🔄 Làm mới
+          </button>
+        </div>
+
+        <!-- 3 Sub-Tabs trong Thư viện -->
+        <div class="flex items-center gap-2 border-b border-slate-800 pb-3">
+          <button
+            id="libTabDownloads"
+            onclick="switchLibCategory('downloads')"
+            class="lib-subtab active px-3.5 py-1.5 rounded-lg border border-slate-700 text-xs font-semibold text-slate-300 transition"
+          >
+            📥 Video Đã Tải (<span id="countDownloads">0</span>)
+          </button>
+          <button
+            id="libTabOutputs"
+            onclick="switchLibCategory('outputs')"
+            class="lib-subtab px-3.5 py-1.5 rounded-lg border border-slate-800 text-xs font-semibold text-slate-400 hover:text-white transition"
+          >
+            🏆 Video Đã Sub / Xuất (<span id="countOutputs">0</span>)
+          </button>
+          <button
+            id="libTabSubtitles"
+            onclick="switchLibCategory('subtitles')"
+            class="lib-subtab px-3.5 py-1.5 rounded-lg border border-slate-800 text-xs font-semibold text-slate-400 hover:text-white transition"
+          >
+            📝 File Phụ Đề .SRT (<span id="countSubtitles">0</span>)
+          </button>
+        </div>
+
+        <!-- Danh sách 1: Video Đã Tải (downloads/) -->
+        <div id="libListDownloads" class="space-y-2.5 max-h-[420px] overflow-y-auto pr-1"></div>
+
+        <!-- Danh sách 2: Video Đã Sub / Xuất (outputs/) -->
+        <div id="libListOutputs" class="space-y-2.5 max-h-[420px] overflow-y-auto pr-1 hidden"></div>
+
+        <!-- Danh sách 3: Các File Phụ Đề (.srt) + Trình Sửa Trực Tiếp -->
+        <div id="libListSubtitlesWrap" class="space-y-4 hidden">
+          <div id="libListSubtitles" class="space-y-2 max-h-[220px] overflow-y-auto pr-1"></div>
+
+          <!-- Khung Sửa Phụ Đề Trực Tiếp trong Thư Viện -->
+          <div id="directSubEditorPanel" class="sub-panel p-4 space-y-3 hidden border-sky-500/40">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-sky-400">✏️ Đang sửa trực tiếp:</span>
+                <span id="editingSubFilename" class="mono text-xs text-white font-semibold bg-slate-900 px-2.5 py-1 rounded border border-slate-700"></span>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <!-- Chuyển chế độ sửa Từng câu vs Raw SRT -->
+                <div class="flex bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px]">
+                  <button
+                    id="btnSubModeVisual"
+                    onclick="switchSubEditorMode('visual')"
+                    class="px-2.5 py-1 rounded-md bg-slate-800 text-white font-medium"
+                  >
+                    Theo từng câu
+                  </button>
+                  <button
+                    id="btnSubModeRaw"
+                    onclick="switchSubEditorMode('raw')"
+                    class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white"
+                  >
+                    Mã SRT gốc
+                  </button>
+                </div>
+
+                <button
+                  onclick="saveDirectSubtitleFile()"
+                  class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3.5 py-1.5 rounded-lg text-xs transition"
+                >
+                  💾 Lưu File Này
+                </button>
+                <button
+                  onclick="closeDirectSubEditor()"
+                  class="text-slate-400 hover:text-white px-2 py-1 text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <!-- Chế độ 1: Sửa trực tiếp từng dòng (Visual Table) -->
+            <div id="subEditorVisualWrap" class="space-y-2">
+              <div id="subEditorVisualList" class="space-y-2 max-h-[260px] overflow-y-auto pr-1"></div>
+              <button
+                onclick="addVisualSubRow()"
+                class="w-full py-1.5 border border-dashed border-slate-700 hover:border-sky-500 rounded-lg text-xs text-slate-400 hover:text-sky-400 transition"
+              >
+                + Thêm câu phụ đề mới
+              </button>
+            </div>
+
+            <!-- Chế độ 2: Sửa mã SRT gốc -->
+            <div id="subEditorRawWrap" class="hidden">
+              <textarea
+                id="directSubTextarea"
+                rows="12"
+                class="mono w-full bg-[#090d16] border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-sky-500 leading-relaxed"
+              ></textarea>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- RIGHT COLUMN (5 COLS): UNIFIED VIDEO MONITOR & PROGRESS -->
+    <div class="lg:col-span-5 space-y-4 lg:sticky lg:top-22">
+
+      <div class="panel p-4 space-y-3">
+        <!-- Segmented Switch: Video Gốc vs Thành Phẩm -->
+        <div class="flex items-center justify-between bg-[#0b0f19] p-1 rounded-xl border border-slate-800">
+          <button
+            id="btnModeSource"
+            onclick="switchPlayerMode('source')"
+            class="flex-1 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-white transition"
+          >
+            🎬 Video Gốc
+          </button>
+          <button
+            id="btnModeOutput"
+            onclick="switchPlayerMode('output')"
+            class="flex-1 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition"
+          >
+            🏆 Video Đã Lồng Tiếng
+          </button>
+        </div>
+
+        <!-- Video Element -->
+        <div class="relative rounded-xl overflow-hidden bg-black aspect-video border border-slate-800/80">
+          <video id="sourceVideoPlayer" controls class="w-full h-full object-contain"></video>
+          <video id="outputVideoPlayer" controls class="w-full h-full object-contain hidden"></video>
+        </div>
+
+        <!-- Progress Box -->
+        <div id="globalTaskBox" class="hidden bg-slate-900 border border-sky-500/30 rounded-xl p-3 space-y-2">
+          <div class="flex items-center justify-between text-xs">
+            <div class="flex items-center gap-2">
+              <div class="animate-spin w-3.5 h-3.5 border-2 border-sky-400 border-t-transparent rounded-full"></div>
+              <span id="taskMsg" class="text-slate-200 font-medium">Đang xử lý...</span>
+            </div>
+            <span id="taskPct" class="text-sky-400 font-bold">0%</span>
+          </div>
+          <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div id="taskBar" class="h-full bg-sky-500 transition-all duration-300" style="width: 5%"></div>
+          </div>
+        </div>
+
+        <!-- Quick Recent Outputs List -->
+        <div class="flex items-center justify-between pt-1">
+          <span class="text-xs text-slate-400">Các bản đã xuất gần đây</span>
+          <div class="flex items-center gap-3">
+            <a
+              id="downloadOutputBtn"
+              href="#"
+              download
+              class="hidden text-xs font-semibold text-emerald-400 hover:underline"
+            >
+              ⬇️ Tải bản đang xem
+            </a>
+            <button onclick="switchStep(4); switchLibCategory('outputs');" class="text-[11px] text-sky-400 hover:underline">
+              Quản lý tất cả →
+            </button>
+          </div>
+        </div>
+
+        <div id="outputListContainer" class="space-y-1.5 max-h-[150px] overflow-y-auto pr-1"></div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- NON-INTRUSIVE TOAST NOTIFICATION -->
+  <div
+    id="toastBox"
+    class="fixed bottom-5 right-5 z-50 hidden bg-slate-800 border border-slate-700 text-white px-4 py-3 rounded-xl shadow-2xl text-xs font-medium max-w-sm transition-all"
+  ></div>
+
+  <script>
+    let currentVideoFilename = "";
+    let cachedLibraryData = { videos: [], outputs: [], subtitles: [], logos: [] };
+    let currentEditingSubFile = "";
+    let currentSubEditorMode = "visual"; // visual | raw
+
+    const DEFAULT_MARTIAL_ARTS_PROMPT = `Bạn là biên kịch phim kiếm hiệp / tiên hiệp chuyên nghiệp. Hãy dịch file phụ đề SRT tiếng Trung dưới đây sang tiếng Việt:
+1. Giữ nguyên chính xác số thứ tự câu và mốc thời gian timestamp (00:00:00,000 --> 00:00:00,000).
+2. Dịch theo văn phong cổ trang, kiếm hiệp, tu tiên Trung Quốc (xưng hô: ta - ngươi, cô nương, huynh đệ, bổn tọa, nữ đế, tiền bối...).
+3. Câu từ gãy gọn, súc tích, tự nhiên như văn nói trong phim để khi AI đọc lồng tiếng vừa khít thời lượng câu gốc, không bị dài dòng.
+4. Chỉ trả về nội dung file SRT hoàn chỉnh, không giải thích thêm.
+
+Nội dung SRT cần dịch:
+`;
+
+    function showToast(msg) {
+      const box = document.getElementById("toastBox");
+      box.textContent = msg;
+      box.classList.remove("hidden");
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => {
+        box.classList.add("hidden");
+      }, 4000);
+    }
+
+    function switchStep(step) {
+      [1, 2, 3, 4].forEach((s) => {
+        const view = document.getElementById(`viewStep${s}`);
+        const tab = document.getElementById(`tabStep${s}`);
+        if (s === step) {
+          view.classList.remove("hidden");
+          tab.classList.add("active");
+        } else {
+          view.classList.add("hidden");
+          tab.classList.remove("active");
+        }
+      });
+    }
+
+    function switchLibCategory(cat) {
+      const cats = ["downloads", "outputs", "subtitles"];
+      cats.forEach((c) => {
+        const btn = document.getElementById("libTab" + c.charAt(0).toUpperCase() + c.slice(1));
+        if (c === cat) {
+          btn.classList.add("active");
+        } else {
+          btn.classList.remove("active");
+        }
+      });
+      document.getElementById("libListDownloads").classList.toggle("hidden", cat !== "downloads");
+      document.getElementById("libListOutputs").classList.toggle("hidden", cat !== "outputs");
+      document.getElementById("libListSubtitlesWrap").classList.toggle("hidden", cat !== "subtitles");
+    }
+
+    function switchPlayerMode(mode) {
+      const srcPlayer = document.getElementById("sourceVideoPlayer");
+      const outPlayer = document.getElementById("outputVideoPlayer");
+      const btnSrc = document.getElementById("btnModeSource");
+      const btnOut = document.getElementById("btnModeOutput");
+
+      if (mode === "source") {
+        outPlayer.pause();
+        outPlayer.classList.add("hidden");
+        srcPlayer.classList.remove("hidden");
+        btnSrc.className = "flex-1 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-white transition";
+        btnOut.className = "flex-1 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition";
+      } else {
+        srcPlayer.pause();
+        srcPlayer.classList.add("hidden");
+        outPlayer.classList.remove("hidden");
+        btnOut.className = "flex-1 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white transition";
+        btnSrc.className = "flex-1 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition";
+      }
+    }
+
+    async function loadLocalFiles(selectFilename = null) {
+      const res = await fetch("/api/local-files");
+      const data = await res.json();
+      cachedLibraryData = data;
+
+      // Update library counts
+      const totalCount = (data.videos?.length || 0) + (data.outputs?.length || 0) + (data.subtitles?.length || 0);
+      document.getElementById("libTotalBadge").textContent = totalCount;
+      document.getElementById("countDownloads").textContent = data.videos?.length || 0;
+      document.getElementById("countOutputs").textContent = data.outputs?.length || 0;
+      document.getElementById("countSubtitles").textContent = data.subtitles?.length || 0;
+
+      // Populate Step 1 Select
+      const vSel = document.getElementById("localVideoSelect");
+      vSel.innerHTML = "";
+      if (data.videos.length === 0) {
+        vSel.innerHTML = `<option value="">-- Chưa có video nào trong máy --</option>`;
+      } else {
+        data.videos.forEach((v) => {
+          const badges = [];
+          if (v.has_zh_srt) badges.push("Sub Trung");
+          if (v.has_vi_srt) badges.push("Sub Việt");
+          const badgeText = badges.length ? ` • [${badges.join(" + ")}]` : "";
+          const opt = document.createElement("option");
+          opt.value = v.filename;
+          opt.dataset.url = v.url;
+          opt.textContent = `${v.filename} (${v.size_mb} MB)${badgeText}`;
+          vSel.appendChild(opt);
+        });
+
+        if (selectFilename && data.videos.some((x) => x.filename === selectFilename)) {
+          vSel.value = selectFilename;
+        } else if (!currentVideoFilename || !data.videos.some((x) => x.filename === currentVideoFilename)) {
+          const sample = data.videos.find((x) => x.filename.includes("sample_1min"));
+          if (sample) vSel.value = sample.filename;
+        } else {
+          vSel.value = currentVideoFilename;
+        }
+        await onSelectLocalVideo();
+      }
+
+      // Populate Logos
+      const lSel = document.getElementById("logoSelect");
+      const prevLogo = lSel.value;
+      lSel.innerHTML = `<option value="">-- Không chèn Logo --</option>`;
+      data.logos.forEach((l) => {
+        const opt = document.createElement("option");
+        opt.value = l;
+        opt.textContent = l;
+        lSel.appendChild(opt);
+      });
+      if (prevLogo && data.logos.includes(prevLogo)) {
+        lSel.value = prevLogo;
+      } else if (data.logos.includes("sample_logo.png")) {
+        lSel.value = "sample_logo.png";
+      }
+
+      // Populate Quick Outputs on Right Column
+      const outBox = document.getElementById("outputListContainer");
+      outBox.innerHTML = "";
+      if (data.outputs.length === 0) {
+        outBox.innerHTML = `<div class="text-xs text-slate-500 py-2">Chưa có video xuất ra.</div>`;
+      } else {
+        data.outputs.forEach((o, idx) => {
+          const div = document.createElement("div");
+          div.className = "flex items-center justify-between bg-[#0b0f19] px-3 py-2 rounded-lg border border-slate-800/80 text-xs";
+          div.innerHTML = `
+            <span class="truncate max-w-[200px] text-slate-300" title="${o.filename}">${o.filename}</span>
+            <div class="flex items-center gap-2.5">
+              <button onclick="playOutputVideo('${o.url}', '${o.filename}')" class="text-sky-400 hover:text-sky-300 font-medium">Xem</button>
+              <a href="${o.url}" download class="text-slate-400 hover:text-white">Tải</a>
+              <button onclick="deleteLibraryItem('output', '${o.filename}')" class="text-rose-400 hover:text-rose-300" title="Xoá">✕</button>
+            </div>
+          `;
+          outBox.appendChild(div);
+          if (idx === 0 && !document.getElementById("outputVideoPlayer").getAttribute("src")) {
+            document.getElementById("outputVideoPlayer").src = o.url;
+          }
+        });
+      }
+
+      // Render Full Library Lists
+      renderLibraryViews();
+    }
+
+    function renderLibraryViews() {
+      // 1. Render Downloads List
+      const dlBox = document.getElementById("libListDownloads");
+      dlBox.innerHTML = "";
+      if (!cachedLibraryData.videos || cachedLibraryData.videos.length === 0) {
+        dlBox.innerHTML = `<div class="text-xs text-slate-500 py-6 text-center">Chưa có video nào trong thư mục tải về.</div>`;
+      } else {
+        cachedLibraryData.videos.forEach((v) => {
+          const row = document.createElement("div");
+          row.className = "sub-panel p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3";
+          const badges = [];
+          if (v.has_zh_srt) badges.push(`<span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px]">🇨🇳 Sub Trung</span>`);
+          if (v.has_vi_srt) badges.push(`<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px]">🇻🇳 Sub Việt</span>`);
+          if (v.has_bgm) badges.push(`<span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[10px]">🎶 Đã tách BGM</span>`);
+
+          row.innerHTML = `
+            <div class="space-y-1 min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold text-white truncate" title="${v.filename}">${v.filename}</span>
+                <span class="text-[11px] text-slate-400 shrink-0">(${v.size_mb} MB)</span>
+              </div>
+              <div class="flex flex-wrap items-center gap-1.5">${badges.join("") || '<span class="text-[11px] text-slate-500">Chưa tách phụ đề</span>'}</div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button onclick="selectAndPlayDownload('${v.filename}')" class="bg-slate-800 hover:bg-slate-700 text-sky-400 px-2.5 py-1.5 rounded-lg text-xs font-medium">
+                ▶️ Xem
+              </button>
+              <button onclick="selectAndEditSub('${v.filename}')" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-2.5 py-1.5 rounded-lg text-xs font-medium">
+                ✏️ Sửa Sub
+              </button>
+              <button onclick="promptRenameItem('download', '${v.filename}')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg text-xs">
+                Đổi tên
+              </button>
+              <button onclick="deleteLibraryItem('download', '${v.filename}', true)" class="bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 px-2.5 py-1.5 rounded-lg text-xs">
+                🗑️ Xoá
+              </button>
+            </div>
+          `;
+          dlBox.appendChild(row);
+        });
+      }
+
+      // 2. Render Outputs List
+      const outBox = document.getElementById("libListOutputs");
+      outBox.innerHTML = "";
+      if (!cachedLibraryData.outputs || cachedLibraryData.outputs.length === 0) {
+        outBox.innerHTML = `<div class="text-xs text-slate-500 py-6 text-center">Chưa có video đã lồng tiếng nào.</div>`;
+      } else {
+        cachedLibraryData.outputs.forEach((o) => {
+          const row = document.createElement("div");
+          row.className = "sub-panel p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3";
+          row.innerHTML = `
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-semibold text-white truncate" title="${o.filename}">${o.filename}</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">Dung lượng: ${o.size_mb} MB • Đã lồng tiếng & đóng sub</div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button onclick="playOutputVideo('${o.url}', '${o.filename}')" class="bg-slate-800 hover:bg-slate-700 text-sky-400 px-2.5 py-1.5 rounded-lg text-xs font-medium">
+                ▶️ Xem
+              </button>
+              <a href="${o.url}" download class="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-2.5 py-1.5 rounded-lg text-xs font-medium">
+                ⬇️ Tải
+              </a>
+              <button onclick="promptRenameItem('output', '${o.filename}')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg text-xs">
+                Đổi tên
+              </button>
+              <button onclick="deleteLibraryItem('output', '${o.filename}')" class="bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 px-2.5 py-1.5 rounded-lg text-xs">
+                🗑️ Xoá
+              </button>
+            </div>
+          `;
+          outBox.appendChild(row);
+        });
+      }
+
+      // 3. Render Subtitles List
+      const subBox = document.getElementById("libListSubtitles");
+      subBox.innerHTML = "";
+      if (!cachedLibraryData.subtitles || cachedLibraryData.subtitles.length === 0) {
+        subBox.innerHTML = `<div class="text-xs text-slate-500 py-6 text-center">Chưa có file phụ đề (.srt) nào.</div>`;
+      } else {
+        cachedLibraryData.subtitles.forEach((s) => {
+          const langBadge =
+            s.lang === "vi"
+              ? `<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold">🇻🇳 Tiếng Việt</span>`
+              : s.lang === "zh"
+              ? `<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-semibold">🇨🇳 Tiếng Trung</span>`
+              : `<span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px]">SRT</span>`;
+
+          const row = document.createElement("div");
+          row.className = "sub-panel p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2";
+          row.innerHTML = `
+            <div class="flex items-center gap-2.5 min-w-0 flex-1">
+              ${langBadge}
+              <span class="mono text-xs text-white truncate" title="${s.filename}">${s.filename}</span>
+              <span class="text-[11px] text-slate-400 shrink-0">(${s.line_count} câu • ${s.size_kb} KB)</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button onclick="openDirectSubEditor('${s.filename}')" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded-lg text-xs font-medium">
+                ✏️ Sửa trực tiếp
+              </button>
+              <a href="${s.url}" download class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg text-xs">
+                ⬇️ Tải
+              </a>
+              <button onclick="promptRenameItem('subtitle', '${s.filename}')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg text-xs">
+                Đổi tên
+              </button>
+              <button onclick="deleteLibraryItem('subtitle', '${s.filename}')" class="bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 px-2.5 py-1 rounded-lg text-xs">
+                🗑️ Xoá
+              </button>
+            </div>
+          `;
+          subBox.appendChild(row);
+        });
+      }
+    }
+
+    async function selectAndPlayDownload(filename) {
+      document.getElementById("localVideoSelect").value = filename;
+      await onSelectLocalVideo();
+      switchPlayerMode("source");
+      document.getElementById("sourceVideoPlayer").play();
+    }
+
+    async function selectAndEditSub(filename) {
+      document.getElementById("localVideoSelect").value = filename;
+      await onSelectLocalVideo();
+      switchStep(2);
+    }
+
+    async function promptRenameItem(category, oldFilename) {
+      const newName = prompt("Nhập tên mới cho file:", oldFilename);
+      if (!newName || newName.trim() === "" || newName.trim() === oldFilename) return;
+
+      const res = await fetch("/api/library/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          old_filename: oldFilename,
+          new_filename: newName.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast("❌ " + (data.detail || "Không thể đổi tên"));
+
+      if (category === "download" && currentVideoFilename === oldFilename) {
+        currentVideoFilename = data.new_filename;
+      }
+      await loadLocalFiles(currentVideoFilename);
+      showToast(`✅ Đã đổi tên thành: ${data.new_filename}`);
+    }
+
+    async function deleteLibraryItem(category, filename, askRelated = false) {
+      let msg = `Bạn có chắc muốn xoá file "${filename}" không?`;
+      if (askRelated) {
+        msg = `Bạn có chắc muốn xoá video "${filename}" cùng các file phụ đề / nhạc nền đi kèm không?`;
+      }
+      if (!confirm(msg)) return;
+
+      const res = await fetch("/api/library/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          filename,
+          delete_related: askRelated,
+        }),
+      });
+      if (!res.ok) return showToast("❌ Lỗi khi xoá file");
+
+      if (currentEditingSubFile === filename) {
+        closeDirectSubEditor();
+      }
+      await loadLocalFiles();
+      showToast(`🗑️ Đã xoá: ${filename}`);
+    }
+
+    // ==================== TRÌNH SỬA PHỤ ĐỀ TRỰC TIẾP TRONG THƯ VIỆN ====================
+    function parseSrtToBlocks(raw) {
+      const blocks = [];
+      const parts = raw.trim().split(/\n\s*\n/);
+      for (const p of parts) {
+        const lines = p.trim().split("\n");
+        if (lines.length >= 2) {
+          let timeLine = "";
+          let textLines = [];
+          if (lines[0].includes("-->")) {
+            timeLine = lines[0].trim();
+            textLines = lines.slice(1);
+          } else if (lines[1] && lines[1].includes("-->")) {
+            timeLine = lines[1].trim();
+            textLines = lines.slice(2);
+          }
+          if (timeLine) {
+            blocks.push({
+              time: timeLine,
+              text: textLines.join(" ").trim(),
+            });
+          }
+        }
+      }
+      return blocks;
+    }
+
+    function blocksToSrt(blocks) {
+      return blocks
+        .filter((b) => b.time.trim() !== "" || b.text.trim() !== "")
+        .map((b, i) => `${i + 1}\n${b.time.trim()}\n${b.text.trim()}`)
+        .join("\n\n");
+    }
+
+    function renderVisualSubRows(srtContent) {
+      const listEl = document.getElementById("subEditorVisualList");
+      listEl.innerHTML = "";
+      const blocks = parseSrtToBlocks(srtContent);
+      blocks.forEach((b, idx) => {
+        appendSingleVisualRow(idx + 1, b.time, b.text);
+      });
+    }
+
+    function appendSingleVisualRow(indexNum, timeStr, textStr) {
+      const listEl = document.getElementById("subEditorVisualList");
+      const row = document.createElement("div");
+      row.className = "sub-row-item flex items-center gap-2 bg-[#090d16] p-2 rounded-lg border border-slate-800/90";
+      row.innerHTML = `
+        <span class="sub-row-idx w-6 text-center text-[11px] text-slate-500 font-mono">${indexNum}</span>
+        <input
+          type="text"
+          value="${timeStr.replace(/"/g, '&quot;')}"
+          class="sub-row-time mono w-48 bg-slate-900 border border-slate-700/80 rounded px-2 py-1 text-[11px] text-sky-300 focus:outline-none focus:border-sky-500"
+        />
+        <input
+          type="text"
+          value="${textStr.replace(/"/g, '&quot;')}"
+          placeholder="Nhập nội dung lời thoại..."
+          class="sub-row-text flex-1 bg-slate-900 border border-slate-700/80 rounded px-2.5 py-1 text-xs text-white focus:outline-none focus:border-sky-500"
+        />
+        <button
+          onclick="this.parentElement.remove(); reindexVisualRows();"
+          class="text-rose-400 hover:text-rose-300 px-1.5 text-xs"
+          title="Xoá câu này"
+        >
+          ✕
+        </button>
+      `;
+      listEl.appendChild(row);
+    }
+
+    function reindexVisualRows() {
+      const rows = document.querySelectorAll("#subEditorVisualList .sub-row-item");
+      rows.forEach((r, i) => {
+        r.querySelector(".sub-row-idx").textContent = i + 1;
+      });
+    }
+
+    function addVisualSubRow() {
+      const rows = document.querySelectorAll("#subEditorVisualList .sub-row-item");
+      appendSingleVisualRow(rows.length + 1, "00:00:00,000 --> 00:00:02,000", "");
+    }
+
+    function collectVisualRowsToSrt() {
+      const rows = document.querySelectorAll("#subEditorVisualList .sub-row-item");
+      const blocks = [];
+      rows.forEach((r) => {
+        const time = r.querySelector(".sub-row-time").value.trim();
+        const text = r.querySelector(".sub-row-text").value.trim();
+        if (time || text) {
+          blocks.push({ time, text });
+        }
+      });
+      return blocksToSrt(blocks);
+    }
+
+    function switchSubEditorMode(mode) {
+      if (mode === currentSubEditorMode) return;
+      const rawBox = document.getElementById("directSubTextarea");
+      if (mode === "raw") {
+        rawBox.value = collectVisualRowsToSrt();
+      } else {
+        renderVisualSubRows(rawBox.value);
+      }
+      currentSubEditorMode = mode;
+
+      document.getElementById("subEditorVisualWrap").classList.toggle("hidden", mode !== "visual");
+      document.getElementById("subEditorRawWrap").classList.toggle("hidden", mode !== "raw");
+
+      document.getElementById("btnSubModeVisual").className =
+        mode === "visual"
+          ? "px-2.5 py-1 rounded-md bg-slate-800 text-white font-medium"
+          : "px-2.5 py-1 rounded-md text-slate-400 hover:text-white";
+      document.getElementById("btnSubModeRaw").className =
+        mode === "raw"
+          ? "px-2.5 py-1 rounded-md bg-slate-800 text-white font-medium"
+          : "px-2.5 py-1 rounded-md text-slate-400 hover:text-white";
+    }
+
+    async function openDirectSubEditor(filename) {
+      const res = await fetch(`/api/library/subtitle/${encodeURIComponent(filename)}`);
+      if (!res.ok) return showToast("❌ Không thể đọc file phụ đề");
+      const data = await res.json();
+
+      currentEditingSubFile = data.filename;
+      document.getElementById("editingSubFilename").textContent = data.filename;
+      document.getElementById("directSubTextarea").value = data.content || "";
+      renderVisualSubRows(data.content || "");
+
+      document.getElementById("directSubEditorPanel").classList.remove("hidden");
+    }
+
+    function closeDirectSubEditor() {
+      currentEditingSubFile = "";
+      document.getElementById("directSubEditorPanel").classList.add("hidden");
+    }
+
+    async function saveDirectSubtitleFile() {
+      if (!currentEditingSubFile) return;
+      const content =
+        currentSubEditorMode === "visual"
+          ? collectVisualRowsToSrt()
+          : document.getElementById("directSubTextarea").value.trim();
+
+      const res = await fetch("/api/library/subtitle/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: currentEditingSubFile,
+          content,
+        }),
+      });
+      if (!res.ok) return showToast("❌ Lỗi khi lưu file phụ đề");
+
+      await loadLocalFiles(currentVideoFilename);
+      showToast(`💾 Đã lưu thay đổi vào ${currentEditingSubFile}!`);
+    }
+
+    async function saveCurrentSubPair() {
+      if (!currentVideoFilename) return showToast("Vui lòng chọn video trước!");
+      const zh_srt = document.getElementById("zhSrtBox").value.trim();
+      const vi_srt = document.getElementById("viSrtBox").value.trim();
+      const res = await fetch("/api/subtitles/save-pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          video_filename: currentVideoFilename,
+          zh_srt,
+          vi_srt,
+        }),
+      });
+      if (res.ok) {
+        await loadLocalFiles(currentVideoFilename);
+        showToast("💾 Đã lưu trực tiếp phụ đề Tiếng Trung & Tiếng Việt!");
+      }
+    }
+
+    async function onSelectLocalVideo() {
+      const vSel = document.getElementById("localVideoSelect");
+      const fname = vSel.value;
+      if (!fname) return;
+      currentVideoFilename = fname;
+      const opt = vSel.options[vSel.selectedIndex];
+      const url = opt ? opt.dataset.url : "";
+
+      document.getElementById("currentVideoBadge").textContent = fname;
+      const player = document.getElementById("sourceVideoPlayer");
+      if (url && player.getAttribute("src") !== url) {
+        player.src = url;
+      }
+
+      const res = await fetch(`/api/subtitles/${encodeURIComponent(fname)}`);
+      if (res.ok) {
+        const subs = await res.json();
+        document.getElementById("zhSrtBox").value = subs.zh_srt || "";
+        document.getElementById("viSrtBox").value = subs.vi_srt || "";
+        updateLineCounts();
+      }
+    }
+
+    function updateLineCounts() {
+      const zh = document.getElementById("zhSrtBox").value.trim();
+      const vi = document.getElementById("viSrtBox").value.trim();
+      const zhCount = zh ? (zh.match(/-->/g) || []).length : 0;
+      const viCount = vi ? (vi.match(/-->/g) || []).length : 0;
+      document.getElementById("zhLineCount").textContent = `${zhCount} câu`;
+      const viBadge = document.getElementById("viLineCount");
+      if (zhCount > 0 && viCount === zhCount) {
+        viBadge.className = "text-[11px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium";
+        viBadge.textContent = `${viCount}/${zhCount} câu (Khớp)`;
+      } else {
+        viBadge.className = "text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-400";
+        viBadge.textContent = `${viCount} câu`;
+      }
+    }
+
+    async function pollTask(taskId, onDone) {
+      const box = document.getElementById("globalTaskBox");
+      const msgEl = document.getElementById("taskMsg");
+      const pctEl = document.getElementById("taskPct");
+      const barEl = document.getElementById("taskBar");
+      box.classList.remove("hidden");
+
+      const timer = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/task/${taskId}`);
+          if (!res.ok) return;
+          const t = await res.json();
+          msgEl.textContent = t.message || "Đang xử lý...";
+          pctEl.textContent = `${t.progress || 0}%`;
+          barEl.style.width = `${t.progress || 5}%`;
+
+          if (t.status === "done") {
+            clearInterval(timer);
+            setTimeout(() => box.classList.add("hidden"), 1200);
+            if (onDone) onDone(t.result);
+          } else if (t.status === "error") {
+            clearInterval(timer);
+            box.classList.add("hidden");
+            showToast("❌ Lỗi: " + (t.error || t.message));
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 1000);
+    }
+
+    async function analyzeBilibili() {
+      const url = document.getElementById("biliUrlInput").value.trim();
+      if (!url) return showToast("Vui lòng nhập link Bilibili!");
+      showToast("🔍 Đang lấy thông tin video...");
+      try {
+        const res = await fetch("/api/bilibili/info", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Lỗi phân tích link");
+
+        document.getElementById("biliInfoPanel").classList.remove("hidden");
+        document.getElementById("biliTitle").textContent = data.title;
+        document.getElementById("biliAuthor").textContent = `UP: ${data.author} • ${data.pages.length} tập`;
+
+        const pSel = document.getElementById("biliPageSelect");
+        pSel.innerHTML = "";
+        data.pages.forEach((p) => {
+          const opt = document.createElement("option");
+          opt.value = p.page;
+          opt.textContent = `Tập ${p.page}: ${p.part} (${p.duration_min}p)`;
+          pSel.appendChild(opt);
+        });
+        showToast("✅ Đã lấy danh sách tập!");
+      } catch (e) {
+        showToast("❌ " + e.message);
+      }
+    }
+
+    async function downloadBilibili() {
+      const url = document.getElementById("biliUrlInput").value.trim();
+      const page = parseInt(document.getElementById("biliPageSelect").value || "1", 10);
+      const quality = parseInt(document.getElementById("biliQualitySelect").value || "64", 10);
+
+      const res = await fetch("/api/bilibili/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, page, quality }),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast("❌ " + (data.detail || "Lỗi tải video"));
+
+      pollTask(data.task_id, async (result) => {
+        await loadLocalFiles(result.filename);
+        showToast("✅ Tải video hoàn tất!");
+        switchStep(2);
+      });
+    }
+
+    async function extractChineseSub() {
+      if (!currentVideoFilename) return showToast("Vui lòng chọn video ở Bước 1!");
+      const model_size = document.getElementById("whisperModelSelect").value;
+      const separate_bgm = document.getElementById("chkSeparateExtract").checked;
+
+      const res = await fetch("/api/extract-sub", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          video_filename: currentVideoFilename,
+          model_size,
+          separate_bgm,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast("❌ " + (data.detail || "Lỗi tách sub"));
+
+      pollTask(data.task_id, async (result) => {
+        document.getElementById("zhSrtBox").value = result.zh_srt || "";
+        updateLineCounts();
+        await loadLocalFiles(currentVideoFilename);
+        showToast("✅ Đã tách xong phụ đề tiếng Trung!");
+      });
+    }
+
+    async function copyWithPromptForAIWeb() {
+      const zh = document.getElementById("zhSrtBox").value.trim();
+      if (!zh) return showToast("Chưa có phụ đề Tiếng Trung để copy!");
+      const fullText = DEFAULT_MARTIAL_ARTS_PROMPT + "\n" + zh;
+      await navigator.clipboard.writeText(fullText);
+      showToast("✅ Đã copy Sub + Prompt! Hãy dán (Cmd+V) vào ChatGPT/DeepSeek.");
+    }
+
+    async function pasteFromClipboardToVi() {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          document.getElementById("viSrtBox").value = text.trim();
+          updateLineCounts();
+          showToast("✅ Đã dán bản dịch Tiếng Việt!");
+        }
+      } catch (e) {
+        showToast("Hãy click vào ô Tiếng Việt và nhấn Cmd+V / Ctrl+V.");
+      }
+    }
+
+    async function autoTranslateSub(provider = "google") {
+      const zh = document.getElementById("zhSrtBox").value.trim();
+      if (!zh) return showToast("Chưa có phụ đề Tiếng Trung!");
+
+      const btn = event.target;
+      const oldText = btn.textContent;
+      btn.textContent = "Đang dịch...";
+      btn.disabled = true;
+
+      try {
+        const res = await fetch("/api/translate-auto", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ srt_content: zh, provider }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Lỗi dịch tự động");
+        document.getElementById("viSrtBox").value = data.vi_srt || "";
+        updateLineCounts();
+        showToast("✅ Đã dịch tự động sang Tiếng Việt!");
+      } catch (e) {
+        showToast("❌ " + e.message);
+      } finally {
+        btn.textContent = oldText;
+        btn.disabled = false;
+      }
+    }
+
+    function importViSrtFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        document.getElementById("viSrtBox").value = e.target.result;
+        updateLineCounts();
+        showToast("✅ Đã nhập file phụ đề!");
+      };
+      reader.readAsText(file, "utf-8");
+    }
+
+    function downloadTextFile(lang) {
+      const content = document.getElementById(lang === "zh" ? "zhSrtBox" : "viSrtBox").value.trim();
+      if (!content) return showToast("Nội dung phụ đề đang trống!");
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      const stem = currentVideoFilename ? currentVideoFilename.replace(/\.mp4$/i, "") : "subtitles";
+      a.download = `${stem}_${lang}.srt`;
+      a.click();
+    }
+
+    async function previewVoice() {
+      const voice = document.getElementById("voiceSelect").value;
+      const rate = document.getElementById("rateSelect").value;
+      const pitch = document.getElementById("pitchSelect").value;
+      showToast("🔊 Đang tạo mẫu thử giọng...");
+      const res = await fetch("/api/tts-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Không thể ngã xuống... Ta vẫn chưa thể chết ở nơi này! Kẻ mù, trường kiếm, quan tài đồng xanh.",
+          voice,
+          rate,
+          pitch,
+        }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        const audio = document.getElementById("voicePreviewPlayer");
+        audio.src = data.url;
+        audio.classList.remove("hidden");
+        audio.play();
+      }
+    }
+
+    async function createTextBadge() {
+      const text = document.getElementById("quickBadgeText").value.trim();
+      if (!text) return showToast("Hãy nhập tên kênh trước!");
+      const res = await fetch("/api/create-text-logo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (data.filename) {
+        await loadLocalFiles(currentVideoFilename);
+        document.getElementById("logoSelect").value = data.filename;
+        showToast(`✅ Đã tạo logo "${text}"!`);
+      }
+    }
+
+    async function uploadLogoFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/upload-logo", { method: "POST", body: form });
+      const data = await res.json();
+      if (data.filename) {
+        await loadLocalFiles(currentVideoFilename);
+        document.getElementById("logoSelect").value = data.filename;
+        showToast("✅ Đã tải lên logo mới!");
+      }
+    }
+
+    function playOutputVideo(url, filename) {
+      switchPlayerMode("output");
+      const player = document.getElementById("outputVideoPlayer");
+      player.src = url;
+      player.play();
+      const dlBtn = document.getElementById("downloadOutputBtn");
+      dlBtn.href = url;
+      dlBtn.download = filename;
+      dlBtn.classList.remove("hidden");
+    }
+
+    async function startDubAndRender() {
+      if (!currentVideoFilename) {
+        switchStep(1);
+        return showToast("Vui lòng chọn video ở Bước 1!");
+      }
+      const vi_srt_content = document.getElementById("viSrtBox").value.trim();
+      if (!vi_srt_content) {
+        switchStep(2);
+        return showToast("Chưa có Phụ đề Tiếng Việt ở Bước 2!");
+      }
+
+      const payload = {
+        video_filename: currentVideoFilename,
+        vi_srt_content,
+        voice: document.getElementById("voiceSelect").value,
+        rate: document.getElementById("rateSelect").value,
+        pitch: document.getElementById("pitchSelect").value,
+        bgm_volume: parseFloat(document.getElementById("bgmVolSlider").value),
+        separate_bgm: document.getElementById("chkSeparateDub").checked,
+        burn_hardsub: document.getElementById("chkHardsub").checked,
+        logo_filename: document.getElementById("logoSelect").value || null,
+        logo_position: document.getElementById("logoPosSelect").value,
+        logo_width: parseInt(document.getElementById("logoWidthInput").value || "150", 10),
+      };
+
+      const res = await fetch("/api/dub-render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast("❌ " + (data.detail || "Lỗi xuất video"));
+
+      pollTask(data.task_id, async (result) => {
+        await loadLocalFiles(currentVideoFilename);
+        playOutputVideo(result.output_url || result.url, result.output_filename || result.filename);
+        showToast("🎉 Xuất video hoàn tất!");
+      });
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      loadLocalFiles();
+    });
+  </script>
+</body>
+</html>
