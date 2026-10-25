@@ -35,7 +35,7 @@ from bili_downloader import (
     sanitize_filename,
     QUALITY_MAP,
 )
-from extract_sub import extract_subtitles, separate_audio_stems, FFMPEG
+from extract_sub import extract_subtitles, separate_audio_stems, check_colab_worker, FFMPEG
 from dub_video import run_dubbing_pipeline, parse_srt
 
 BASE_DIR = "/Users/dungnguyenquoc/Dev/ToolAI"
@@ -98,6 +98,11 @@ class ExtractSubReq(BaseModel):
     video_filename: str
     model_size: str = "base"
     separate_bgm: bool = True
+    colab_url: Optional[str] = None
+
+
+class ColabCheckReq(BaseModel):
+    colab_url: str
 
 
 class AutoTranslateReq(BaseModel):
@@ -479,34 +484,53 @@ async def api_bilibili_download(req: BiliDownloadReq):
     return {"task_id": tid}
 
 
+@app.post("/api/colab/check")
+async def api_colab_check(req: ColabCheckReq):
+    try:
+        url = req.colab_url.strip()
+        if not url:
+            raise HTTPException(status_code=400, detail="Vui lòng nhập URL Colab")
+        status = check_colab_worker(url)
+        return {"status": "ok", "data": status}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Không thể kết nối Colab: {e}")
+
+
 @app.post("/api/extract-sub")
 async def api_extract_sub(req: ExtractSubReq):
     video_path = os.path.join(DOWNLOADS_DIR, req.video_filename)
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Không tìm thấy file video")
 
-    tid = create_task("Nhận diện giọng nói & tách nhạc nền")
+    mode_title = "Colab GPU (Demucs + Whisper)" if req.colab_url else f"Local M1 (Whisper {req.model_size})"
+    tid = create_task(f"Nhận diện giọng nói & tách nhạc nền [{mode_title}]")
 
     def worker():
         try:
             base, _ = os.path.splitext(video_path)
             output_srt = f"{base}_zh.srt"
-            if req.separate_bgm:
-                TASKS[tid]["message"] = "Đang tách nhạc nền (BGM) & giọng nói bằng AI Spleeter ONNX..."
-                TASKS[tid]["progress"] = 25
-                separate_audio_stems(video_path)
 
-            TASKS[tid]["message"] = f"Đang nhận diện phụ đề tiếng Trung (Faster-Whisper {req.model_size})..."
-            TASKS[tid]["progress"] = 55
+            if req.colab_url and req.colab_url.strip():
+                TASKS[tid]["message"] = f"Đang kết nối Cloud GPU Colab ({req.model_size} + Demucs v4)..."
+                TASKS[tid]["progress"] = 30
+            else:
+                if req.separate_bgm:
+                    TASKS[tid]["message"] = "Đang tách nhạc nền (BGM) & giọng nói bằng AI Spleeter ONNX..."
+                    TASKS[tid]["progress"] = 25
+                    separate_audio_stems(video_path)
+                TASKS[tid]["message"] = f"Đang nhận diện phụ đề tiếng Trung (Faster-Whisper {req.model_size})..."
+                TASKS[tid]["progress"] = 55
+
             srt_content = extract_subtitles(
                 video_path,
                 output_srt=output_srt,
                 model_size=req.model_size,
                 separate_bgm=req.separate_bgm,
+                colab_url=req.colab_url,
             )
             TASKS[tid]["status"] = "done"
             TASKS[tid]["progress"] = 100
-            TASKS[tid]["message"] = "Trích xuất phụ đề tiếng Trung hoàn tất!"
+            TASKS[tid]["message"] = "Trích xuất phụ đề & BGM hoàn tất!"
             TASKS[tid]["result"] = {"zh_srt": srt_content}
         except Exception as e:
             TASKS[tid]["status"] = "error"

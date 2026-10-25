@@ -6,15 +6,117 @@ Kế thừa trực tiếp mô hình Faster-Whisper và Sherpa-ONNX Spleeter từ
 
 import os
 import sys
+import json
+import uuid
 import shutil
 import argparse
 import subprocess
+import urllib.request
+import urllib.error
+import urllib.parse
 from pathlib import Path
 
 PYVIDEOTRANS_DIR = "/Users/dungnguyenquoc/Dev/ToolAI/pyvideotrans"
 FFMPEG = f"{PYVIDEOTRANS_DIR}/ffmpeg/ffmpeg"
 if not os.path.exists(FFMPEG):
     FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+
+
+def check_colab_worker(colab_url: str) -> dict:
+    """Kiểm tra tình trạng máy chủ GPU Colab."""
+    url = f"{colab_url.rstrip('/')}/health"
+    req = urllib.request.Request(url, headers={"User-Agent": "ToolMovieAI-Client"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def upload_file_multipart(url: str, file_path: str, fields: dict, timeout: int = 600) -> dict:
+    """Tải file lên server bằng multipart/form-data qua urllib (không cần cài thêm thư viện)."""
+    boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
+    body = bytearray()
+
+    for k, v in fields.items():
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{k}"\r\n\r\n'.encode("utf-8"))
+        body.extend(f"{v}\r\n".encode("utf-8"))
+
+    filename = os.path.basename(file_path)
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode("utf-8"))
+    body.extend(b"Content-Type: audio/wav\r\n\r\n")
+    with open(file_path, "rb") as f:
+        body.extend(f.read())
+    body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+
+    req = urllib.request.Request(url, data=body)
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    req.add_header("User-Agent", "ToolMovieAI-Client")
+
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def process_with_colab(
+    video_path: str,
+    colab_url: str,
+    model_size: str = "large-v3",
+    separate_bgm: bool = True,
+    output_srt: str = None
+) -> tuple[str, str, str]:
+    """
+    Trích xuất âm thanh từ video cục bộ, gửi lên Colab GPU để tách BGM (Demucs v4)
+    và nhận diện phụ đề (Faster-Whisper large-v3).
+    Chỉ gửi file audio nhẹ (~10MB) nên cực nhanh và không tốn băng thông video.
+    """
+    base, _ = os.path.splitext(video_path)
+    if not output_srt:
+        output_srt = f"{base}_zh.srt"
+    vocal_file = f"{base}_vocal.wav"
+    instr_file = f"{base}_bgm.wav"
+
+    colab_base = colab_url.rstrip("/")
+    print(f"📡 Đang kết nối tới Colab GPU Worker ({colab_base})...")
+
+    # 1. Trích xuất audio nén nhẹ (16kHz mono/stereo) để upload siêu tốc
+    temp_raw = f"{base}_temp_upload.wav"
+    subprocess.run([
+        FFMPEG, "-y", "-i", video_path,
+        "-vn", "-ac", "2", "-ar", "16000", "-c:a", "pcm_s16le", temp_raw
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+    try:
+        print(f"🚀 [Colab GPU] Đang tải audio ({round(os.path.getsize(temp_raw)/(1024*1024), 1)}MB) lên Colab...")
+        fields = {
+            "model_size": model_size,
+            "language": "zh",
+            "separate_bgm": "true" if separate_bgm else "false",
+        }
+        res = upload_file_multipart(f"{colab_base}/api/process-all", temp_raw, fields)
+
+        srt_content = res.get("srt_content", "")
+        with open(output_srt, "w", encoding="utf-8") as f:
+            f.write(srt_content)
+        print(f"✅ [Colab GPU] Đã nhận diện xong phụ đề tiếng Trung ({res.get('duration', 0)}s)!")
+
+        # 2. Tải file BGM tách sạch (Demucs v4) về máy Mac
+        if res.get("has_bgm") and res.get("bgm_url"):
+            bgm_dl_url = f"{colab_base}{res['bgm_url']}"
+            print("🎶 [Colab GPU] Đang tải file BGM chất lượng cao (Demucs v4) về cache...")
+            req = urllib.request.Request(bgm_dl_url, headers={"User-Agent": "ToolMovieAI-Client"})
+            with urllib.request.urlopen(req, timeout=120) as resp, open(instr_file, "wb") as f_out:
+                shutil.copyfileobj(resp, f_out)
+            print(f"✅ Đã lưu file BGM tách sạch: {os.path.basename(instr_file)}")
+
+        if res.get("vocal_url"):
+            vocal_dl_url = f"{colab_base}{res['vocal_url']}"
+            req = urllib.request.Request(vocal_dl_url, headers={"User-Agent": "ToolMovieAI-Client"})
+            with urllib.request.urlopen(req, timeout=120) as resp, open(vocal_file, "wb") as f_out:
+                shutil.copyfileobj(resp, f_out)
+
+        return srt_content, vocal_file, instr_file
+    finally:
+        if os.path.exists(temp_raw):
+            os.remove(temp_raw)
 
 
 def separate_audio_stems(video_path: str) -> tuple[str, str]:
@@ -76,7 +178,13 @@ def separate_audio_stems(video_path: str) -> tuple[str, str]:
         return vocal_file, instr_file
 
 
-def extract_subtitles(video_path: str, output_srt: str = None, model_size: str = "base", separate_bgm: bool = True) -> str:
+def extract_subtitles(
+    video_path: str,
+    output_srt: str = None,
+    model_size: str = "base",
+    separate_bgm: bool = True,
+    colab_url: str = None
+) -> str:
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Không tìm thấy file: {video_path}")
 
@@ -84,6 +192,22 @@ def extract_subtitles(video_path: str, output_srt: str = None, model_size: str =
         base, _ = os.path.splitext(video_path)
         output_srt = f"{base}_zh.srt"
 
+    # 1. Nếu có Colab URL, ưu tiên xử lý bằng GPU đám mây (Demucs v4 + Faster-Whisper large-v3)
+    if colab_url and colab_url.strip():
+        try:
+            target_model = model_size if model_size in ["large-v3", "medium", "small"] else "large-v3"
+            srt_content, _, _ = process_with_colab(
+                video_path=video_path,
+                colab_url=colab_url.strip(),
+                model_size=target_model,
+                separate_bgm=separate_bgm,
+                output_srt=output_srt
+            )
+            return srt_content
+        except Exception as e:
+            print(f"⚠️ Không thể xử lý qua Colab ({e}). Tự động fallback về chạy trên Mac M1...")
+
+    # 2. Xử lý cục bộ trên Mac M1
     audio_input = video_path
     if separate_bgm:
         try:
@@ -148,6 +272,7 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output", help="Đường dẫn file .srt đầu ra (mặc định: cùng tên _zh.srt)")
     parser.add_argument("-m", "--model", default="base", choices=["tiny", "base", "small", "medium", "large-v3"], help="Mô hình Whisper (mặc định: base)")
     parser.add_argument("--no-separate", action="store_true", help="Không tách nhạc nền trước khi nhận diện")
+    parser.add_argument("--colab-url", help="URL máy chủ Colab GPU Worker (ví dụ: https://xxx.trycloudflare.com)")
     args = parser.parse_args()
 
-    extract_subtitles(args.video, args.output, args.model, separate_bgm=not args.no_separate)
+    extract_subtitles(args.video, args.output, args.model, separate_bgm=not args.no_separate, colab_url=args.colab_url)
