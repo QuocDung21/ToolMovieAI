@@ -52,8 +52,20 @@ def upload_file_multipart(url: str, file_path: str, fields: dict, timeout: int =
     req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
     req.add_header("User-Agent", "ToolMovieAI-Client")
 
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_msg = ""
+        try:
+            err_msg = e.read().decode("utf-8", errors="ignore")[:300]
+        except Exception:
+            pass
+        raise RuntimeError(f"Máy chủ Colab trả về HTTP {e.code}: {err_msg or e.reason}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Không thể kết nối đường truyền Cloudflare: {e.reason}")
+    except OSError as e:
+        raise RuntimeError(f"Đường truyền Colab bị gián đoạn ({e}). Vui lòng kiểm tra lại tab Google Colab!")
 
 
 def process_with_colab(
@@ -76,6 +88,14 @@ def process_with_colab(
 
     colab_base = colab_url.rstrip("/")
     print(f"📡 Đang kết nối tới Colab GPU Worker ({colab_base})...")
+
+    # Kiểm tra health trước khi trích xuất và tải file
+    try:
+        health = check_colab_worker(colab_base)
+        gpu_name = health.get("gpu", {}).get("name", "GPU")
+        print(f"🟢 Colab GPU sẵn sàng: {gpu_name}")
+    except Exception as e:
+        raise RuntimeError(f"Máy chủ Colab chưa phản hồi hoặc link Cloudflare đã hết hạn ({e}). Vui lòng kiểm tra lại tab Colab!")
 
     # 1. Trích xuất audio nén nhẹ (16kHz mono/stereo) để upload siêu tốc
     temp_raw = f"{base}_temp_upload.wav"
@@ -205,7 +225,9 @@ def extract_subtitles(
             )
             return srt_content
         except Exception as e:
-            print(f"⚠️ Không thể xử lý qua Colab ({e}). Tự động fallback về chạy trên Mac M1...")
+            print(f"⚠️ Không thể xử lý qua Colab ({e}). Tự động fallback về chạy trên Mac M1 (chuyển sang model base)...")
+            if model_size == "large-v3":
+                model_size = "base"
 
     # 2. Xử lý cục bộ trên Mac M1
     audio_input = video_path
