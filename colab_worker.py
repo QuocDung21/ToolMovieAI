@@ -38,35 +38,61 @@ os.makedirs(STORAGE_DIR, exist_ok=True)
 WHISPER_MODELS = {}
 
 
+def get_device_allocation():
+    """Phân bổ GPU tối ưu: Nếu có 2 GPU (như Kaggle T4 x2), tách riêng Demucs và Whisper."""
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return "cpu", "cpu", 0
+        count = torch.cuda.device_count()
+        if count >= 2:
+            # GPU 0: Demucs (tách nhạc nền), GPU 1: Whisper (nhận diện phụ đề)
+            return "cuda:0", "cuda:1", count
+        return "cuda:0", "cuda:0", count
+    except Exception:
+        return "cpu", "cpu", 0
+
+
 def get_gpu_info():
     try:
         import torch
         if torch.cuda.is_available():
-            dev_name = torch.cuda.get_device_name(0)
-            total_mem = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-            free_mem = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+            count = torch.cuda.device_count()
+            names = [torch.cuda.get_device_name(i) for i in range(count)]
+            total_mem = sum(torch.cuda.get_device_properties(i).total_memory for i in range(count)) / (1024 ** 3)
+            free_mem = sum(torch.cuda.mem_get_info(i)[0] for i in range(count)) / (1024 ** 3)
+            gpu_desc = f"{count}x {names[0]}" if count > 1 else names[0]
             return {
                 "available": True,
-                "name": dev_name,
+                "name": gpu_desc,
+                "device_count": count,
                 "total_vram_gb": round(total_mem, 2),
                 "free_vram_gb": round(free_mem, 2),
             }
     except Exception:
         pass
-    return {"available": False, "name": "CPU", "total_vram_gb": 0, "free_vram_gb": 0}
+    return {"available": False, "name": "CPU", "device_count": 0, "total_vram_gb": 0, "free_vram_gb": 0}
 
 
 def get_whisper_model(model_size: str = "large-v3"):
     from faster_whisper import WhisperModel
     import torch
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    compute_type = "float16" if device == "cuda" else "int8"
+    _, whisper_device, _ = get_device_allocation()
+    compute_type = "float16" if "cuda" in whisper_device else "int8"
+    cache_key = f"{model_size}_{whisper_device}"
 
-    if model_size not in WHISPER_MODELS:
-        print(f"🔥 Đang nạp mô hình Faster-Whisper {model_size} ({device} - {compute_type})...")
-        WHISPER_MODELS[model_size] = WhisperModel(model_size, device=device, compute_type=compute_type)
-    return WHISPER_MODELS[model_size]
+    if cache_key not in WHISPER_MODELS:
+        print(f"🔥 Đang nạp mô hình Faster-Whisper {model_size} ({whisper_device} - {compute_type})...")
+        device_type = "cuda" if "cuda" in whisper_device else "cpu"
+        device_index = int(whisper_device.split(":")[1]) if ":" in whisper_device else 0
+        WHISPER_MODELS[cache_key] = WhisperModel(
+            model_size,
+            device=device_type,
+            device_index=device_index,
+            compute_type=compute_type
+        )
+    return WHISPER_MODELS[cache_key]
 
 
 def format_timestamp(seconds: float) -> str:
@@ -104,12 +130,12 @@ async def separate_bgm(file: UploadFile = File(...)):
 
     try:
         import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        demucs_device, _, _ = get_device_allocation()
         cmd = [
             sys.executable, "-m", "demucs.separate",
             "-n", "htdemucs",
             "--two-stems", "vocals",
-            "-d", device,
+            "-d", demucs_device,
             "-o", session_dir,
             input_path
         ]
@@ -216,17 +242,17 @@ async def process_all(
 
     try:
         import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        demucs_device, _, _ = get_device_allocation()
         audio_for_whisper = input_path
         has_bgm = False
 
         if separate_bgm:
-            print("🎵 [Colab GPU] Đang chạy Demucs v4 tách Vocal & BGM...")
+            print(f"🎵 [Cloud GPU] Đang chạy Demucs v4 tách Vocal & BGM (thiết bị: {demucs_device})...")
             cmd = [
                 sys.executable, "-m", "demucs.separate",
                 "-n", "htdemucs",
                 "--two-stems", "vocals",
-                "-d", device,
+                "-d", demucs_device,
                 "-o", session_dir,
                 input_path
             ]
@@ -244,7 +270,7 @@ async def process_all(
             else:
                 print(f"⚠️ Demucs cảnh báo: {res.stderr}")
 
-        print(f"🎙️ [Colab GPU] Đang chạy Faster-Whisper ({model_size})...")
+        print(f"🎙️ [Cloud GPU] Đang chạy Faster-Whisper ({model_size})...")
         model = get_whisper_model(model_size)
         prompt = "以下是中文普通话对白，请使用简体中文输出字幕。" if language == "zh" else None
 

@@ -219,17 +219,17 @@
           </div>
         </div>
 
-        <!-- GPU Cloud Acceleration Banner (Google Colab) -->
+        <!-- GPU Cloud Acceleration Banner (Google Colab & Kaggle) -->
         <div class="sub-panel p-3.5 border-amber-500/20 bg-amber-950/10 rounded-xl space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2.5">
               <span class="text-base">⚡</span>
               <div>
                 <div class="flex items-center gap-2">
-                  <span class="text-xs font-bold text-amber-300">Tăng tốc Cloud GPU (Google Colab)</span>
+                  <span class="text-xs font-bold text-amber-300">Tăng tốc Cloud GPU (Google Colab / Kaggle)</span>
                   <span id="colabStatusBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">Chưa kích hoạt (Chạy Local M1)</span>
                 </div>
-                <p class="text-[11px] text-slate-400">Tách BGM siêu sạch (Demucs v4) & Nhận diện Whisper Large-v3 nhanh gấp 15x</p>
+                <p class="text-[11px] text-slate-400">Tách BGM siêu sạch (Demucs v4) & Nhận diện Whisper Large-v3 (hỗ trợ Dual GPU T4 x2)</p>
               </div>
             </div>
 
@@ -242,6 +242,14 @@
                 <span>Mở Colab</span>
                 <span class="text-xs">↗</span>
               </a>
+              <a
+                href="https://www.kaggle.com/code/new"
+                target="_blank"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded-lg transition"
+              >
+                <span>Mở Kaggle</span>
+                <span class="text-xs">↗</span>
+              </a>
               <label class="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" id="chkUseColab" class="sr-only peer" onchange="toggleColabMode()" />
                 <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
@@ -249,12 +257,12 @@
             </div>
           </div>
 
-          <!-- Colab Connection Inputs (Toggled) -->
+          <!-- Colab/Kaggle Connection Inputs (Toggled) -->
           <div id="colabConfigBox" class="hidden pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
             <input
               type="text"
               id="colabUrlInput"
-              placeholder="Dán link Cloudflare Colab: https://xxxx.trycloudflare.com"
+              placeholder="Dán link Cloudflare Colab / Kaggle: https://xxxx.trycloudflare.com"
               class="flex-1 min-w-[240px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 mono"
               onchange="saveColabUrl()"
             />
@@ -1360,11 +1368,11 @@ Nội dung SRT cần dịch:
         const gpu = result.data?.gpu || {};
         badge.className = "text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300 border border-emerald-700/50";
         badge.textContent = `🟢 GPU: ${gpu.name || 'Nvidia'} (${gpu.free_vram_gb || 0}GB VRAM rảnh)`;
-        showToast(`⚡ Đã kết nối GPU Colab: ${gpu.name || 'Nvidia'}!`);
+        showToast(`⚡ Đã kết nối Cloud GPU: ${gpu.name || 'Nvidia'}!`);
         saveColabUrl();
       } catch (e) {
         badge.className = "text-[10px] px-2 py-0.5 rounded-full bg-rose-900/60 text-rose-300 border border-rose-700/50";
-        badge.textContent = "🔴 Lỗi kết nối Colab";
+        badge.textContent = "🔴 Lỗi kết nối Cloud GPU";
         showToast("❌ " + e.message);
       } finally {
         btn.textContent = "🔌 Kiểm tra kết nối";
