@@ -55,11 +55,23 @@ Hệ thống tự động hóa tải video, trích xuất phụ đề tiếng Tr
 
 ## 🛠️ Cài đặt & Khởi chạy Local Studio
 
+Sử dụng `Makefile` để quản lý dự án nhanh chóng:
+
 ```bash
-# Khởi động Web Studio
-./start_studio.sh
-# Hoặc chạy trực tiếp:
-uvicorn web_app:app --host 127.0.0.1 --port 8080
+# 1. Khởi động Web Studio
+make run
+
+# Hoặc chạy chế độ phát triển (tự động reload khi sửa code):
+make dev
+
+# 2. Dừng máy chủ khi không dùng:
+make stop
+
+# 3. Kiểm tra trạng thái máy chủ:
+make status
+
+# 4. Xem toàn bộ danh sách lệnh:
+make help
 ```
 Truy cập trình duyệt tại: **http://127.0.0.1:8080**
 
@@ -69,6 +81,7 @@ Truy cập trình duyệt tại: **http://127.0.0.1:8080**
 
 ```
 ToolMovieAI/
+├── Makefile                 # Quản lý khởi chạy, dừng và kiểm tra máy chủ nhanh (make run, make stop...)
 ├── colab_worker.py          # FastAPI Worker server (hỗ trợ cả Single-GPU Colab & Dual-GPU Kaggle)
 ├── colab_gpu_worker.ipynb   # Jupyter Notebook 1-click triển khai trên Google Colab
 ├── kaggle_gpu_worker.ipynb  # Jupyter Notebook móc trực tiếp từ GitHub chạy trên Kaggle
