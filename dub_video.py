@@ -465,16 +465,21 @@ def process_dubbing_with_colab(
     progress_cb=None
 ) -> str:
     """Ủy thác toàn bộ pipeline lồng tiếng và render video lên GPU Google Colab / Kaggle."""
-    colab_base = colab_url.rstrip("/")
+    from extract_sub import check_colab_worker, clean_colab_url
+
+    colab_base = clean_colab_url(colab_url)
+    if not colab_base:
+        raise ValueError("URL máy chủ Colab không hợp lệ hoặc đang để trống!")
+
     if progress_cb:
         progress_cb(f"Đang kết nối tới Colab GPU Worker ({colab_base})...", 10)
 
-    from extract_sub import check_colab_worker
-    check_colab_worker(colab_base)
+    health = check_colab_worker(colab_base)
+    gpu_name = health.get("gpu", {}).get("name", "Nvidia GPU")
 
     if progress_cb:
         v_size_mb = round(os.path.getsize(video_path) / (1024 * 1024), 1)
-        progress_cb(f"Đang tải video ({v_size_mb}MB) & phụ đề lên Colab GPU...", 20)
+        progress_cb(f"[{gpu_name}] Đang tải video ({v_size_mb}MB) & cấu hình lên Colab...", 20)
 
     fields = {
         "srt_content": srt_content,
@@ -489,7 +494,7 @@ def process_dubbing_with_colab(
     }
 
     if progress_cb:
-        progress_cb("Colab GPU đang xử lý tạo giọng Edge-TTS, hòa âm BGM và render video...", 45)
+        progress_cb(f"[{gpu_name}] Đang tạo giọng Edge-TTS, tách BGM Demucs v4 & render video...", 45)
 
     res = upload_dubbing_to_colab(
         url=f"{colab_base}/api/dub-video",
@@ -506,9 +511,20 @@ def process_dubbing_with_colab(
         progress_cb("Colab đã render hoàn tất! Đang tải video thành phẩm về máy...", 85)
 
     dl_url = f"{colab_base}{res['download_url']}"
-    req = urllib.request.Request(dl_url, headers={"User-Agent": "ToolMovieAI-Client"})
-    with urllib.request.urlopen(req, timeout=600) as resp, open(output_path, "wb") as f_out:
-        shutil.copyfileobj(resp, f_out)
+    last_dl_err = None
+    for attempt in range(1, 4):
+        try:
+            req = urllib.request.Request(dl_url, headers={"User-Agent": "ToolMovieAI-Client"})
+            with urllib.request.urlopen(req, timeout=600) as resp, open(output_path, "wb") as f_out:
+                shutil.copyfileobj(resp, f_out)
+            last_dl_err = None
+            break
+        except Exception as e:
+            last_dl_err = e
+            time.sleep(2 * attempt)
+
+    if last_dl_err:
+        raise RuntimeError(f"Không thể tải video từ Colab về máy: {last_dl_err}")
 
     if progress_cb:
         progress_cb("Hoàn tất xuất video qua Colab GPU!", 100)

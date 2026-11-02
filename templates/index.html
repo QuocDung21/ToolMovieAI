@@ -260,7 +260,7 @@
               id="colabUrlInput"
               placeholder="Dán link Cloudflare Colab / Kaggle: https://xxxx.trycloudflare.com"
               class="flex-1 min-w-[260px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 mono"
-              onchange="saveColabUrl()"
+              onchange="syncColabUrlFromStep2()"
             />
             <button
               type="button"
@@ -377,21 +377,50 @@
         </div>
 
         <!-- Tùy chọn Tăng tốc Render qua Colab GPU -->
-        <div class="sub-panel p-3.5 border-amber-500/30 bg-amber-950/20 rounded-xl flex items-center justify-between gap-3">
-          <div class="flex items-center gap-2.5">
-            <span class="text-base">⚡</span>
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-bold text-amber-300">Tăng tốc Lồng tiếng & Render qua Colab GPU</span>
-                <span id="colabDubBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium">Cloud GPU</span>
+        <div class="sub-panel p-4 border-amber-500/30 bg-amber-950/20 rounded-xl space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2.5">
+              <span class="text-base">⚡</span>
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-amber-300">Máy chủ Colab GPU (Lồng tiếng & Xuất Video)</span>
+                  <span id="colabDubStatusBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium">Bắt buộc chạy qua Colab GPU</span>
+                </div>
+                <p class="text-[11px] text-slate-400">Tạo giọng đọc Edge-TTS, tách BGM Demucs v4 & xuất video bằng GPU Nvidia A100/T4 đám mây</p>
               </div>
-              <p class="text-[11px] text-slate-400">Tạo giọng đọc Edge-TTS, hòa âm và xuất video trực tiếp trên Cloud Colab (cực nhanh, không tốn tài nguyên máy)</p>
             </div>
+            <label class="flex items-center gap-2 text-xs text-amber-200 cursor-pointer font-medium">
+              <input id="chkColabDub" type="checkbox" checked class="accent-amber-500 rounded" onchange="toggleColabDubBox()" />
+              <span>Bật Cloud GPU</span>
+            </label>
           </div>
-          <label class="flex items-center gap-2 text-xs text-amber-200 cursor-pointer font-medium">
-            <input id="chkColabDub" type="checkbox" checked class="accent-amber-500 rounded" />
-            <span>Chạy qua Colab GPU</span>
-          </label>
+
+          <!-- Colab Dub URL Box -->
+          <div id="colabDubConfigBox" class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              id="colabUrlInputDub"
+              placeholder="Dán link Cloudflare Colab: https://xxxx.trycloudflare.com"
+              class="flex-1 min-w-[260px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 mono"
+              onchange="syncColabUrlFromDub()"
+            />
+            <button
+              type="button"
+              id="btnCheckColabDub"
+              onclick="checkColabDubConnection()"
+              class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-medium px-3 py-1.5 rounded-lg text-xs transition whitespace-nowrap"
+            >
+              🔌 Kiểm tra kết nối
+            </button>
+            <a
+              href="https://colab.research.google.com/github/QuocDung21/ToolMovieAI/blob/main/colab_gpu_worker.ipynb"
+              target="_blank"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition"
+            >
+              <span>Mở Colab</span>
+              <span class="text-xs">↗</span>
+            </a>
+          </div>
         </div>
 
         <!-- 1. Giọng đọc -->
@@ -1344,21 +1373,63 @@ Nội dung SRT cần dịch:
     }
 
     function saveColabUrl() {
-      const url = document.getElementById("colabUrlInput").value.trim();
+      const url = document.getElementById("colabUrlInput")?.value?.trim() || "";
       localStorage.setItem("toolai_colab_url", url);
     }
 
+    function syncColabUrlFromStep2() {
+      const url = (document.getElementById("colabUrlInput")?.value || "").trim();
+      const dubInput = document.getElementById("colabUrlInputDub");
+      if (dubInput) dubInput.value = url;
+      localStorage.setItem("toolai_colab_url", url);
+    }
+
+    function syncColabUrlFromDub() {
+      const dubInput = document.getElementById("colabUrlInputDub");
+      const step2Input = document.getElementById("colabUrlInput");
+      const url = (dubInput ? dubInput.value : "").trim();
+      if (step2Input) step2Input.value = url;
+      localStorage.setItem("toolai_colab_url", url);
+    }
+
+    function toggleColabDubBox() {
+      const chk = document.getElementById("chkColabDub");
+      const box = document.getElementById("colabDubConfigBox");
+      if (box && chk) {
+        box.style.display = chk.checked ? "flex" : "none";
+      }
+    }
+
+    function updateColabBadges(statusText, isSuccess, isError) {
+      const b2 = document.getElementById("colabStatusBadge");
+      const b3 = document.getElementById("colabDubStatusBadge");
+      const clsSuccess = "text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300 border border-emerald-700/50 font-medium";
+      const clsError = "text-[10px] px-2 py-0.5 rounded-full bg-rose-900/60 text-rose-300 border border-rose-700/50 font-medium";
+      const clsPending = "text-[10px] px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-300 border border-amber-700/50 font-medium";
+
+      const cls = isSuccess ? clsSuccess : (isError ? clsError : clsPending);
+      if (b2) {
+        b2.className = cls;
+        b2.textContent = statusText;
+      }
+      if (b3) {
+        b3.className = cls;
+        b3.textContent = statusText;
+      }
+    }
+
     async function checkColabConnection() {
-      const url = document.getElementById("colabUrlInput").value.trim();
-      const badge = document.getElementById("colabStatusBadge");
+      const url = (document.getElementById("colabUrlInput")?.value?.trim() ||
+                   document.getElementById("colabUrlInputDub")?.value?.trim() ||
+                   localStorage.getItem("toolai_colab_url") || "").trim();
       const btn = document.getElementById("btnCheckColab");
+      const btnDub = document.getElementById("btnCheckColabDub");
       if (!url) {
-        badge.className = "text-[10px] px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-300 border border-amber-700/50";
-        badge.textContent = "Chờ nhập URL";
+        updateColabBadges("Chờ nhập URL", false, false);
         return;
       }
-      btn.textContent = "Đang kiểm tra...";
-      btn.disabled = true;
+      if (btn) { btn.textContent = "Đang kiểm tra..."; btn.disabled = true; }
+      if (btnDub) { btnDub.textContent = "Đang kiểm tra..."; btnDub.disabled = true; }
 
       try {
         const res = await fetch("/api/colab/check", {
@@ -1370,22 +1441,32 @@ Nội dung SRT cần dịch:
         if (!res.ok) throw new Error(result.detail || "Không kết nối được");
 
         const gpu = result.data?.gpu || {};
-        badge.className = "text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300 border border-emerald-700/50";
-        badge.textContent = `🟢 GPU: ${gpu.name || 'Nvidia'} (${gpu.free_vram_gb || 0}GB VRAM rảnh)`;
+        const badgeText = `🟢 ${gpu.name || 'GPU Nvidia'} (${gpu.free_vram_gb || 0}GB VRAM rảnh)`;
+        updateColabBadges(badgeText, true, false);
         showToast(`⚡ Đã kết nối Cloud GPU: ${gpu.name || 'Nvidia'}!`);
-        saveColabUrl();
+
+        const clean = result.clean_url || url;
+        if (document.getElementById("colabUrlInput")) document.getElementById("colabUrlInput").value = clean;
+        if (document.getElementById("colabUrlInputDub")) document.getElementById("colabUrlInputDub").value = clean;
+        localStorage.setItem("toolai_colab_url", clean);
       } catch (e) {
-        badge.className = "text-[10px] px-2 py-0.5 rounded-full bg-rose-900/60 text-rose-300 border border-rose-700/50";
-        badge.textContent = "🔴 Lỗi kết nối Cloud GPU";
+        updateColabBadges("🔴 Lỗi kết nối Cloud GPU", false, true);
         showToast("❌ " + e.message);
       } finally {
-        btn.textContent = "🔌 Kiểm tra kết nối";
-        btn.disabled = false;
+        if (btn) { btn.textContent = "🔌 Kiểm tra kết nối"; btn.disabled = false; }
+        if (btnDub) { btnDub.textContent = "🔌 Kiểm tra kết nối"; btnDub.disabled = false; }
       }
     }
 
+    async function checkColabDubConnection() {
+      syncColabUrlFromDub();
+      await checkColabConnection();
+    }
+
     async function testCloudAI() {
-      const url = document.getElementById("colabUrlInput").value.trim();
+      const url = (document.getElementById("colabUrlInput")?.value?.trim() ||
+                   document.getElementById("colabUrlInputDub")?.value?.trim() ||
+                   localStorage.getItem("toolai_colab_url") || "").trim();
       const btn = document.getElementById("btnTestCloudAI");
       if (!url) return showToast("Vui lòng nhập URL Cloudflare trước!");
       btn.textContent = "Đang chạy AI...";
@@ -1400,7 +1481,11 @@ Nội dung SRT cần dịch:
         if (!res.ok) throw new Error(result.detail || "Cloud AI inference thất bại");
         const data = result.data || {};
         showToast(`✅ AI Cloud hoạt động: ${data.model_size}, ${data.latency_ms}ms`);
-        saveColabUrl();
+        if (result.clean_url) {
+          if (document.getElementById("colabUrlInput")) document.getElementById("colabUrlInput").value = result.clean_url;
+          if (document.getElementById("colabUrlInputDub")) document.getElementById("colabUrlInputDub").value = result.clean_url;
+          localStorage.setItem("toolai_colab_url", result.clean_url);
+        }
       } catch (e) {
         showToast("❌ " + e.message);
       } finally {
@@ -1590,12 +1675,18 @@ Nội dung SRT cần dịch:
       }
 
       const use_colab = document.getElementById("chkColabDub")?.checked;
-      const colab_url = use_colab ? (document.getElementById("colabUrlInput")?.value?.trim() || localStorage.getItem("toolai_colab_url") || null) : null;
-
-      if (use_colab && !colab_url) {
-        showToast("⚠️ Vui lòng dán link Cloudflare Colab ở Bước 2 để lồng tiếng qua Colab GPU!");
-        switchStep(2);
-        return;
+      let colab_url = null;
+      if (use_colab) {
+        colab_url = (document.getElementById("colabUrlInputDub")?.value?.trim() ||
+                     document.getElementById("colabUrlInput")?.value?.trim() ||
+                     localStorage.getItem("toolai_colab_url") || "").trim();
+        if (!colab_url) {
+          if (document.getElementById("colabUrlInputDub")) {
+            document.getElementById("colabUrlInputDub").focus();
+          }
+          return showToast("⚠️ Vui lòng dán link Cloudflare Colab trước khi lồng tiếng!");
+        }
+        localStorage.setItem("toolai_colab_url", colab_url);
       }
 
       const payload = {
@@ -1634,7 +1725,12 @@ Nội dung SRT cần dịch:
       // Phục hồi cấu hình GPU Colab đã lưu và tự động kiểm tra kết nối
       const savedColabUrl = localStorage.getItem("toolai_colab_url");
       if (savedColabUrl) {
-        document.getElementById("colabUrlInput").value = savedColabUrl;
+        if (document.getElementById("colabUrlInput")) {
+          document.getElementById("colabUrlInput").value = savedColabUrl;
+        }
+        if (document.getElementById("colabUrlInputDub")) {
+          document.getElementById("colabUrlInputDub").value = savedColabUrl;
+        }
         checkColabConnection();
       }
     });

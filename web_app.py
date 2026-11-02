@@ -500,11 +500,12 @@ async def api_bilibili_download(req: BiliDownloadReq):
 @app.post("/api/colab/check")
 async def api_colab_check(req: ColabCheckReq):
     try:
-        url = req.colab_url.strip()
+        from extract_sub import clean_colab_url, check_colab_worker
+        url = clean_colab_url(req.colab_url)
         if not url:
             raise HTTPException(status_code=400, detail="Vui lòng nhập URL Colab")
         status = check_colab_worker(url)
-        return {"status": "ok", "data": status}
+        return {"status": "ok", "data": status, "clean_url": url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Không thể kết nối Colab: {e}")
 
@@ -512,10 +513,11 @@ async def api_colab_check(req: ColabCheckReq):
 @app.post("/api/colab/test-ai")
 async def api_colab_test_ai(req: ColabCheckReq):
     try:
-        url = req.colab_url.strip()
+        from extract_sub import clean_colab_url, test_colab_ai
+        url = clean_colab_url(req.colab_url)
         if not url:
             raise HTTPException(status_code=400, detail="Vui lòng nhập URL Colab")
-        return {"status": "ok", "data": test_colab_ai(url)}
+        return {"status": "ok", "data": test_colab_ai(url), "clean_url": url}
     except HTTPException:
         raise
     except Exception as e:
@@ -528,7 +530,8 @@ async def api_extract_sub(req: ExtractSubReq):
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Không tìm thấy file video")
 
-    colab_url = (req.colab_url or "").strip()
+    from extract_sub import clean_colab_url
+    colab_url = clean_colab_url(req.colab_url)
     if not colab_url:
         raise HTTPException(
             status_code=400,
@@ -718,7 +721,9 @@ async def api_dub_render(req: DubRenderReq):
     if logo_path and not os.path.exists(logo_path):
         logo_path = None
 
-    colab_active = bool(req.colab_url and req.colab_url.strip())
+    from extract_sub import clean_colab_url
+    colab_clean = clean_colab_url(req.colab_url) if req.colab_url else ""
+    colab_active = bool(colab_clean)
     mode_label = " [Colab GPU]" if colab_active else " [Local]"
     tid = create_task(f"Lồng tiếng AI & Xuất Video{mode_label}")
 
@@ -736,7 +741,7 @@ async def api_dub_render(req: DubRenderReq):
                     video_path=video_path,
                     srt_content=req.vi_srt_content.strip(),
                     output_path=out_path,
-                    colab_url=req.colab_url.strip(),
+                    colab_url=colab_clean,
                     voice=req.voice,
                     rate=req.rate,
                     pitch=req.pitch,

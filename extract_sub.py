@@ -39,17 +39,47 @@ def get_ffmpeg_binary() -> str:
 FFMPEG = get_ffmpeg_binary()
 
 
-def check_colab_worker(colab_url: str) -> dict:
-    """Kiểm tra tình trạng máy chủ GPU Colab."""
-    url = f"{colab_url.rstrip('/')}/health"
-    req = urllib.request.Request(url, headers={"User-Agent": "ToolMovieAI-Client"})
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def clean_colab_url(colab_url: str) -> str:
+    """Chuẩn hóa đường dẫn Colab URL: loại bỏ khoảng trắng, dấu gạch chéo cuối, thêm https:// nếu thiếu."""
+    if not colab_url:
+        return ""
+    u = colab_url.strip().rstrip("/")
+    if not (u.startswith("http://") or u.startswith("https://")):
+        u = f"https://{u}"
+    return u
+
+
+def check_colab_worker(colab_url: str, max_retries: int = 3, timeout: int = 25) -> dict:
+    """Kiểm tra tình trạng máy chủ GPU Colab với cơ chế thử lại cho Cloudflare Quick Tunnels."""
+    clean_url = clean_colab_url(colab_url)
+    if not clean_url:
+        raise ValueError("URL máy chủ Colab không hợp lệ hoặc đang để trống!")
+
+    url = f"{clean_url}/health"
+    last_err = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "ToolMovieAI-Client"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            last_err = f"HTTP {e.code}: {e.reason}"
+            if e.code not in (502, 503, 504):
+                break
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = str(e)
+
+        if attempt < max_retries:
+            time.sleep(1.5 * attempt)
+
+    raise RuntimeError(f"Không thể kết nối máy chủ Colab GPU ({clean_url}): {last_err}")
 
 
 def test_colab_ai(colab_url: str, model_size: str = "tiny") -> dict:
     """Run a small transcription request to verify cloud inference end-to-end."""
-    check_colab_worker(colab_url)
+    clean_url = clean_colab_url(colab_url)
+    check_colab_worker(clean_url)
     sample_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as sample:
@@ -68,7 +98,7 @@ def test_colab_ai(colab_url: str, model_size: str = "tiny") -> dict:
 
         started = time.monotonic()
         result = upload_file_multipart(
-            f"{colab_url.rstrip('/')}/api/transcribe",
+            f"{clean_url}/api/transcribe",
             sample_path,
             {"model_size": model_size, "language": "zh"},
             timeout=180,
@@ -142,7 +172,7 @@ def process_with_colab(
     vocal_file = f"{base}_vocal.wav"
     instr_file = f"{base}_bgm.wav"
 
-    colab_base = colab_url.rstrip("/")
+    colab_base = clean_colab_url(colab_url)
     print(f"📡 Đang kết nối tới Colab GPU Worker ({colab_base})...")
 
     # Kiểm tra health trước khi trích xuất và tải file
@@ -269,7 +299,7 @@ def extract_subtitles(
         output_srt = f"{base}_zh.srt"
 
     # Chỉ cho phép chạy trích xuất phụ đề trên Cloud GPU (Colab / Kaggle)
-    colab_url = (colab_url or "").strip()
+    colab_url = clean_colab_url(colab_url)
     if not colab_url:
         raise ValueError(
             "Chức năng trích xuất phụ đề chỉ cho phép chạy trên Cloud GPU (Google Colab / Kaggle). "
