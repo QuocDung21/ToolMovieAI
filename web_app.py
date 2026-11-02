@@ -723,9 +723,13 @@ async def api_dub_render(req: DubRenderReq):
 
     from extract_sub import clean_colab_url
     colab_clean = clean_colab_url(req.colab_url) if req.colab_url else ""
-    colab_active = bool(colab_clean)
-    mode_label = " [Colab GPU]" if colab_active else " [Local]"
-    tid = create_task(f"Lồng tiếng AI & Xuất Video{mode_label}")
+    if not colab_clean:
+        raise HTTPException(
+            status_code=400,
+            detail="Tính năng Lồng tiếng & Xuất Video bắt buộc chạy trên Cloud GPU (Google Colab / Kaggle) để không làm nóng hay treo máy cá nhân. Vui lòng dán link Cloudflare Colab!"
+        )
+
+    tid = create_task("Lồng tiếng AI & Xuất Video [Colab GPU]")
 
     def worker():
         try:
@@ -736,41 +740,22 @@ async def api_dub_render(req: DubRenderReq):
             use_hardsub = req.burn_hardsub if req.burn_hardsub is not None else req.hardsub
             use_logo_pos = req.logo_position if req.logo_position else req.logo_pos
 
-            if colab_active:
-                process_dubbing_with_colab(
-                    video_path=video_path,
-                    srt_content=req.vi_srt_content.strip(),
-                    output_path=out_path,
-                    colab_url=colab_clean,
-                    voice=req.voice,
-                    rate=req.rate,
-                    pitch=req.pitch,
-                    bgm_volume=req.bgm_volume,
-                    separate_bgm=req.separate_bgm,
-                    hardsub=use_hardsub,
-                    logo_image=logo_path,
-                    logo_pos=use_logo_pos,
-                    logo_width=req.logo_width,
-                    progress_cb=progress_cb,
-                )
-            else:
-                asyncio.run(
-                    run_dubbing_pipeline(
-                        video_path=video_path,
-                        srt_path=vi_srt_path,
-                        output_path=out_path,
-                        voice=req.voice,
-                        rate=req.rate,
-                        pitch=req.pitch,
-                        bgm_volume=req.bgm_volume,
-                        separate_bgm=req.separate_bgm,
-                        hardsub=use_hardsub,
-                        logo_image=logo_path,
-                        logo_pos=use_logo_pos,
-                        logo_width=req.logo_width,
-                        progress_cb=progress_cb,
-                    )
-                )
+            process_dubbing_with_colab(
+                video_path=video_path,
+                srt_content=req.vi_srt_content.strip(),
+                output_path=out_path,
+                colab_url=colab_clean,
+                voice=req.voice,
+                rate=req.rate,
+                pitch=req.pitch,
+                bgm_volume=req.bgm_volume,
+                separate_bgm=req.separate_bgm,
+                hardsub=use_hardsub,
+                logo_image=logo_path,
+                logo_pos=use_logo_pos,
+                logo_width=req.logo_width,
+                progress_cb=progress_cb,
+            )
             TASKS[tid]["status"] = "done"
             TASKS[tid]["progress"] = 100
             TASKS[tid]["message"] = "Xuất video hoàn chỉnh thành công!"

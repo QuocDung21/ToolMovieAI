@@ -386,13 +386,12 @@
                   <span class="text-xs font-bold text-amber-300">Máy chủ Colab GPU (Lồng tiếng & Xuất Video)</span>
                   <span id="colabDubStatusBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium">Bắt buộc chạy qua Colab GPU</span>
                 </div>
-                <p class="text-[11px] text-slate-400">Tạo giọng đọc Edge-TTS, tách BGM Demucs v4 & xuất video bằng GPU Nvidia A100/T4 đám mây</p>
+                <p class="text-[11px] text-slate-400">Tạo giọng đọc Edge-TTS, tách BGM Demucs v4 & xuất video bằng GPU Nvidia A100/T4 đám mây (100% Cloud GPU)</p>
               </div>
             </div>
-            <label class="flex items-center gap-2 text-xs text-amber-200 cursor-pointer font-medium">
-              <input id="chkColabDub" type="checkbox" checked class="accent-amber-500 rounded" onchange="toggleColabDubBox()" />
-              <span>Bật Cloud GPU</span>
-            </label>
+            <span class="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-md font-medium">
+              ⚡ Không ngốn tài nguyên Mac
+            </span>
           </div>
 
           <!-- Colab Dub URL Box -->
@@ -1674,20 +1673,16 @@ Nội dung SRT cần dịch:
         return showToast("Chưa có Phụ đề Tiếng Việt ở Bước 2!");
       }
 
-      const use_colab = document.getElementById("chkColabDub")?.checked;
-      let colab_url = null;
-      if (use_colab) {
-        colab_url = (document.getElementById("colabUrlInputDub")?.value?.trim() ||
-                     document.getElementById("colabUrlInput")?.value?.trim() ||
-                     localStorage.getItem("toolai_colab_url") || "").trim();
-        if (!colab_url) {
-          if (document.getElementById("colabUrlInputDub")) {
-            document.getElementById("colabUrlInputDub").focus();
-          }
-          return showToast("⚠️ Vui lòng dán link Cloudflare Colab trước khi lồng tiếng!");
+      const colab_url = (document.getElementById("colabUrlInputDub")?.value?.trim() ||
+                         document.getElementById("colabUrlInput")?.value?.trim() ||
+                         localStorage.getItem("toolai_colab_url") || "").trim();
+      if (!colab_url) {
+        if (document.getElementById("colabUrlInputDub")) {
+          document.getElementById("colabUrlInputDub").focus();
         }
-        localStorage.setItem("toolai_colab_url", colab_url);
+        return showToast("⚠️ Quy trình lồng tiếng bắt buộc chạy qua Colab GPU! Vui lòng dán link Cloudflare Colab.");
       }
+      localStorage.setItem("toolai_colab_url", colab_url);
 
       const payload = {
         video_filename: currentVideoFilename,
