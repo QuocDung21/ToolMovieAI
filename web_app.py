@@ -35,7 +35,7 @@ from bili_downloader import (
     sanitize_filename,
     QUALITY_MAP,
 )
-from extract_sub import extract_subtitles, separate_audio_stems, check_colab_worker, FFMPEG
+from extract_sub import extract_subtitles, separate_audio_stems, check_colab_worker, test_colab_ai, FFMPEG
 from dub_video import run_dubbing_pipeline, parse_srt
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -506,6 +506,19 @@ async def api_colab_check(req: ColabCheckReq):
         return {"status": "ok", "data": status}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Không thể kết nối Colab: {e}")
+
+
+@app.post("/api/colab/test-ai")
+async def api_colab_test_ai(req: ColabCheckReq):
+    try:
+        url = req.colab_url.strip()
+        if not url:
+            raise HTTPException(status_code=400, detail="Vui lòng nhập URL Colab")
+        return {"status": "ok", "data": test_colab_ai(url)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Cloud AI inference thất bại: {e}")
 
 
 @app.post("/api/extract-sub")

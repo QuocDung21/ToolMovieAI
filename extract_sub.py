@@ -14,6 +14,9 @@ import subprocess
 import urllib.request
 import urllib.error
 import urllib.parse
+import tempfile
+import time
+import wave
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -29,6 +32,39 @@ def check_colab_worker(colab_url: str) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": "ToolMovieAI-Client"})
     with urllib.request.urlopen(req, timeout=8) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def test_colab_ai(colab_url: str, model_size: str = "tiny") -> dict:
+    """Run a small transcription request to verify cloud inference end-to-end."""
+    check_colab_worker(colab_url)
+    sample_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as sample:
+            sample_path = sample.name
+        with wave.open(sample_path, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16_000)
+            audio.writeframes(b"\0\0" * 16_000)
+
+        started = time.monotonic()
+        result = upload_file_multipart(
+            f"{colab_url.rstrip('/')}/api/transcribe",
+            sample_path,
+            {"model_size": model_size, "language": "zh"},
+            timeout=180,
+        )
+        return {
+            "status": "ok",
+            "latency_ms": round((time.monotonic() - started) * 1000),
+            "model_size": model_size,
+            "detected_language": result.get("detected_language"),
+            "duration": result.get("duration", 0),
+            "segments": len(result.get("segments", [])),
+        }
+    finally:
+        if sample_path and os.path.exists(sample_path):
+            os.remove(sample_path)
 
 
 def upload_file_multipart(url: str, file_path: str, fields: dict, timeout: int = 600) -> dict:
