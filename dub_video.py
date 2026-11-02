@@ -82,6 +82,29 @@ def get_media_duration(file_path: str) -> float:
     return 0.0
 
 
+def sanitize_tts_text(text: str) -> str:
+    """Clean subtitle text and remove HTML/markers for TTS synthesis."""
+    if not text:
+        return ""
+    cleaned = re.sub(r'<[^>]+>', '', text)
+    cleaned = re.sub(r'\[.*?\]', '', cleaned)
+    cleaned = re.sub(r'\(.*?\)', '', cleaned)
+    return re.sub(r'\s+', ' ', cleaned).strip()
+
+
+def generate_silence_wav(duration: float, output_wav: str):
+    """Generate silent wav of exact duration as a fallback."""
+    dur = max(0.2, duration)
+    cmd = [
+        FFMPEG, "-y",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-t", f"{dur:.3f}",
+        "-ar", "44100", "-ac", "2",
+        output_wav
+    ]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 async def generate_speech_for_segment(
     text: str,
     voice: str,
@@ -90,29 +113,60 @@ async def generate_speech_for_segment(
     rate: str = "+0%",
     pitch: str = "+0Hz"
 ):
-    """Generate TTS for single subtitle segment and time-stretch if needed."""
+    """Generate TTS for single subtitle segment with retry, text variant recovery, and time-stretch."""
     import edge_tts
 
-    temp_mp3 = output_wav + ".temp.mp3"
-    last_error = None
-    for attempt in range(1, 4):
-        try:
-            comm = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
-            await comm.save(temp_mp3)
-            if not os.path.exists(temp_mp3) or os.path.getsize(temp_mp3) == 0:
-                raise RuntimeError("Edge-TTS returned an empty audio file")
-            break
-        except Exception as error:
-            last_error = error
-            if os.path.exists(temp_mp3):
-                os.remove(temp_mp3)
-            if attempt < 3:
-                await asyncio.sleep(attempt)
+    t_clean = sanitize_tts_text(text)
+    if not t_clean or not any(c.isalnum() for c in t_clean):
+        # Empty or purely non-alphanumeric text
+        generate_silence_wav(target_duration, output_wav)
+        return
+
+    # Build candidates: Edge-TTS Vietnamese parser sometimes requires or rejects specific trailing punctuation
+    candidates = [t_clean]
+    if t_clean.endswith('.'):
+        candidates.append(t_clean[:-1].strip())
+    elif t_clean.endswith(('?', '!', '…', ':')):
+        candidates.append(t_clean[:-1].strip() + '.')
     else:
-        raise RuntimeError(
-            f"Không nhận được audio từ Edge-TTS sau 3 lần thử "
-            f"(voice={voice}, text={text[:80]!r}): {last_error}"
-        ) from last_error
+        candidates.append(t_clean + '.')
+        candidates.append(t_clean + '!')
+
+    fallback_voice = "vi-VN-NamMinhNeural" if "HoaiMy" in voice else "vi-VN-HoaiMyNeural"
+    voices_to_try = [voice, fallback_voice]
+
+    temp_mp3 = output_wav + ".temp.mp3"
+    success = False
+    last_error = None
+
+    for current_voice in voices_to_try:
+        if success:
+            break
+        for c in candidates:
+            if success:
+                break
+            for attempt in range(1, 3):
+                try:
+                    comm = edge_tts.Communicate(c, current_voice, rate=rate, pitch=pitch)
+                    await comm.save(temp_mp3)
+                    if os.path.exists(temp_mp3) and os.path.getsize(temp_mp3) > 0:
+                        success = True
+                        break
+                    else:
+                        raise RuntimeError("Edge-TTS returned an empty audio file")
+                except Exception as error:
+                    last_error = error
+                    if os.path.exists(temp_mp3):
+                        try:
+                            os.remove(temp_mp3)
+                        except OSError:
+                            pass
+                    await asyncio.sleep(0.5 * attempt)
+
+    if not success or not os.path.exists(temp_mp3) or os.path.getsize(temp_mp3) == 0:
+        print(f"⚠️ [TTS Warning] Không nhận được audio cho câu: {text[:60]!r} ({last_error}). Đang dùng khoảng lặng.")
+        generate_silence_wav(target_duration, output_wav)
+        return
 
     raw_dur = get_media_duration(temp_mp3)
     if raw_dur <= 0:
@@ -137,11 +191,13 @@ async def generate_speech_for_segment(
 
     result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     if result.returncode != 0 or not os.path.exists(output_wav) or os.path.getsize(output_wav) == 0:
-        raise RuntimeError(
-            f"FFmpeg không tạo được audio lồng tiếng: {result.stderr[-300:]}"
-        )
+        generate_silence_wav(target_duration, output_wav)
+
     if os.path.exists(temp_mp3):
-        os.remove(temp_mp3)
+        try:
+            os.remove(temp_mp3)
+        except OSError:
+            pass
 
 
 async def run_dubbing_pipeline(
@@ -181,6 +237,7 @@ async def run_dubbing_pipeline(
                 sub["text"], voice, sub["duration"], seg_wav, rate=rate, pitch=pitch
             )
             seg_files.append((sub["start"], seg_wav))
+            await asyncio.sleep(0.25)
 
         report("Đang căn chỉnh các câu thoại vào đúng mốc thời gian...", 60)
         voice_track = os.path.join(temp_dir, "voice_track.wav")

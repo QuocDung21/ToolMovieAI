@@ -640,12 +640,35 @@ async def api_translate_auto(req: AutoTranslateReq):
 @app.post("/api/tts-preview")
 async def api_tts_preview(req: PreviewVoiceReq):
     import edge_tts
-    sample_text = req.text.strip() or "Không thể ngã xuống... Ta vẫn chưa thể chết ở nơi này! Cô nương, có thể phát ra âm thanh bình thường một chút được không?"
+    from dub_video import sanitize_tts_text
+    raw_text = req.text.strip() or "Không thể ngã xuống... Ta vẫn chưa thể chết ở nơi này! Cô nương, có thể phát ra âm thanh bình thường một chút được không?"
+    sample_text = sanitize_tts_text(raw_text) or "Xin chào các bạn."
     out_name = f"preview_{uuid.uuid4().hex[:6]}.mp3"
     out_path = os.path.join(OUTPUTS_DIR, out_name)
-    comm = edge_tts.Communicate(sample_text, req.voice, rate=req.rate, pitch=req.pitch)
-    await comm.save(out_path)
-    return {"url": f"/outputs/{out_name}"}
+
+    candidates = [sample_text]
+    if sample_text.endswith('.'):
+        candidates.append(sample_text[:-1].strip())
+    elif not sample_text.endswith(('?', '!', '…')):
+        candidates.append(sample_text + '.')
+
+    last_err = None
+    for c in candidates:
+        try:
+            comm = edge_tts.Communicate(c, req.voice, rate=req.rate, pitch=req.pitch)
+            await comm.save(out_path)
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                return {"url": f"/outputs/{out_name}"}
+        except Exception as e:
+            last_err = e
+            if os.path.exists(out_path):
+                try:
+                    os.remove(out_path)
+                except OSError:
+                    pass
+            await asyncio.sleep(0.5)
+
+    raise HTTPException(status_code=500, detail=f"Không tạo được âm thanh mẫu: {last_err}")
 
 
 @app.post("/api/upload-logo")
