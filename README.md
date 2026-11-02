@@ -55,6 +55,13 @@ Hệ thống tự động hóa tải video, trích xuất phụ đề tiếng Tr
 
 ## 🛠️ Cài đặt & Khởi chạy Local Studio
 
+```bash
+# Cài dependency
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -r requirements.txt
+```
+
 Sử dụng `Makefile` để quản lý dự án nhanh chóng:
 
 ```bash

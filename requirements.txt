@@ -1,0 +1,13 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.0
+python-multipart>=0.0.9
+openai>=1.0
+edge-tts>=6.1
+numpy>=1.26
+soundfile>=0.12
+Pillow>=10.0
+faster-whisper>=1.0
+sherpa-onnx>=1.10
+torch>=2.0
+pycloudflared>=0.2

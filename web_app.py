@@ -38,7 +38,7 @@ from bili_downloader import (
 from extract_sub import extract_subtitles, separate_audio_stems, check_colab_worker, FFMPEG
 from dub_video import run_dubbing_pipeline, parse_srt
 
-BASE_DIR = "/Users/dungnguyenquoc/Dev/ToolAI"
+BASE_DIR = Path(__file__).resolve().parent
 DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
 OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
 LOGOS_DIR = os.path.join(BASE_DIR, "logos")
@@ -48,6 +48,18 @@ os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
 os.makedirs(LOGOS_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
+
+
+def safe_file_path(directory: str, filename: str) -> str:
+    """Resolve a user-supplied filename without allowing path traversal."""
+    candidate = Path(filename).name
+    if not candidate or candidate in {".", ".."} or candidate != filename:
+        raise HTTPException(status_code=400, detail="Tên file không hợp lệ")
+    root = Path(directory).resolve()
+    path = (root / candidate).resolve()
+    if path.parent != root:
+        raise HTTPException(status_code=400, detail="Đường dẫn file không hợp lệ")
+    return str(path)
 
 # Copy default sample_logo.png into logos dir if present
 default_logo = os.path.join(BASE_DIR, "sample_logo.png")
@@ -239,7 +251,7 @@ async def list_local_files():
 
 @app.get("/api/subtitles/{video_filename}")
 async def get_saved_subtitles(video_filename: str):
-    video_path = os.path.join(DOWNLOADS_DIR, video_filename)
+    video_path = safe_file_path(DOWNLOADS_DIR, video_filename)
     base, _ = os.path.splitext(video_path)
     zh_path = f"{base}_zh.srt"
     vi_path = f"{base}_vi.srt"
@@ -498,7 +510,7 @@ async def api_colab_check(req: ColabCheckReq):
 
 @app.post("/api/extract-sub")
 async def api_extract_sub(req: ExtractSubReq):
-    video_path = os.path.join(DOWNLOADS_DIR, req.video_filename)
+    video_path = safe_file_path(DOWNLOADS_DIR, req.video_filename)
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Không tìm thấy file video")
 
@@ -650,7 +662,7 @@ async def api_create_text_logo(req: TextLogoReq):
 
 @app.post("/api/dub-render")
 async def api_dub_render(req: DubRenderReq):
-    video_path = os.path.join(DOWNLOADS_DIR, req.video_filename)
+    video_path = safe_file_path(DOWNLOADS_DIR, req.video_filename)
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Không tìm thấy file video nguồn")
 
@@ -666,7 +678,7 @@ async def api_dub_render(req: DubRenderReq):
     out_filename = f"{v_stem}_dubbed_{int(time.time()) % 10000}.mp4"
     out_path = os.path.join(OUTPUTS_DIR, out_filename)
 
-    logo_path = os.path.join(LOGOS_DIR, req.logo_filename) if req.logo_filename else None
+    logo_path = safe_file_path(LOGOS_DIR, req.logo_filename) if req.logo_filename else None
     if logo_path and not os.path.exists(logo_path):
         logo_path = None
 

@@ -16,10 +16,11 @@ import urllib.error
 import urllib.parse
 from pathlib import Path
 
-PYVIDEOTRANS_DIR = "/Users/dungnguyenquoc/Dev/ToolAI/pyvideotrans"
-FFMPEG = f"{PYVIDEOTRANS_DIR}/ffmpeg/ffmpeg"
+PROJECT_DIR = Path(__file__).resolve().parent
+PYVIDEOTRANS_DIR = PROJECT_DIR / "pyvideotrans"
+FFMPEG = str(PYVIDEOTRANS_DIR / "ffmpeg" / "ffmpeg")
 if not os.path.exists(FFMPEG):
-    FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 
 
 def check_colab_worker(colab_url: str) -> dict:

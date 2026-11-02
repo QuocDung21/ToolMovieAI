@@ -28,7 +28,7 @@ TEXT_POSITIONS = {
 
 
 def add_image_watermark(input_video: str, logo_image: str, output_video: str, pos: str = "top-right", width: int = 150, opacity: float = 1.0):
-    ffmpeg_bin = shutil.which("ffmpeg") or "/Users/dungnguyenquoc/Dev/ToolAI/bin/ffmpeg"
+    ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
     
     pos_expr = POSITIONS.get(pos, POSITIONS["top-right"])
     
@@ -61,7 +61,7 @@ def add_image_watermark(input_video: str, logo_image: str, output_video: str, po
 
 
 def add_text_watermark(input_video: str, text: str, output_video: str, pos: str = "top-right", font_size: int = 24, font_color: str = "white"):
-    ffmpeg_bin = shutil.which("ffmpeg") or "/Users/dungnguyenquoc/Dev/ToolAI/bin/ffmpeg"
+    ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
     pos_expr = TEXT_POSITIONS.get(pos, TEXT_POSITIONS["top-right"])
     x_expr, y_expr = pos_expr.split(":")
     

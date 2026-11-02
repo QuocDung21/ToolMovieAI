@@ -305,7 +305,7 @@ def main():
             download_with_curl(a_url, tmp_a, desc="Tải luồng Âm thanh")
 
         print("\n⚡ Đang ghép hình ảnh và âm thanh qua FFmpeg...")
-        ffmpeg_bin = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+        ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
         if not ffmpeg_bin or not os.path.exists(ffmpeg_bin):
             raise RuntimeError("Không tìm thấy FFmpeg trên máy!")
 
