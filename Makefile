@@ -32,7 +32,7 @@ start:
 	@if [ -d "$(PYVIDEOTRANS_DIR)" ]; then \
 		cd "$(PYVIDEOTRANS_DIR)" && uv run --offline python "$(PROJECT_DIR)/web_app.py"; \
 	else \
-		python3 "$(PROJECT_DIR)/web_app.py"; \
+		HOST="$(HOST)" PORT="$(PORT)" python3 "$(PROJECT_DIR)/web_app.py"; \
 	fi
 
 dev:

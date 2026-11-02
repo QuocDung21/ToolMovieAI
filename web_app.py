@@ -731,8 +731,10 @@ async def api_dub_render(req: DubRenderReq):
 
 if __name__ == "__main__":
     import uvicorn
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8080"))
     print("\n" + "=" * 65)
     print("🚀 BILIBILI AI SUB & DUBBING STUDIO ĐÃ KHỞI ĐỘNG!")
-    print("👉 Truy cập ngay trên trình duyệt: http://127.0.0.1:8080")
+    print(f"👉 Truy cập ngay trên trình duyệt: http://127.0.0.1:{port}")
     print("=" * 65 + "\n")
-    uvicorn.run("web_app:app", host="127.0.0.1", port=8080, reload=True)
+    uvicorn.run("web_app:app", host=host, port=port, reload=os.getenv("RELOAD", "0") == "1")

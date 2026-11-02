@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+*.py[cod]
+downloads
+outputs
+*.mp4
+*.wav
+*.mp3
+*.m4s
+*.onnx
+*.bin
+*.pt
+*.pth
+.DS_Store

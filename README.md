@@ -82,6 +82,21 @@ make help
 ```
 Truy cập trình duyệt tại: **http://127.0.0.1:8080**
 
+### Chạy bằng Docker
+
+```bash
+docker compose up --build -d
+```
+
+Sau khi container khởi động, mở **http://127.0.0.1:8080**. Uvicorn
+bind trên `0.0.0.0:8080` bên trong container và Docker publish ra
+`127.0.0.1:8080` trên máy host.
+
+```bash
+docker compose logs -f toolmovieai
+docker compose down
+```
+
 ---
 
 ## 📁 Cấu trúc thư mục

@@ -1,0 +1,16 @@
+services:
+  toolmovieai:
+    build:
+      context: .
+    container_name: toolmovieai
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      RELOAD: "0"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./outputs:/app/outputs
+      - ./logos:/app/logos
+    restart: unless-stopped
