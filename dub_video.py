@@ -308,13 +308,25 @@ async def run_dubbing_pipeline(
         # Escape path for ffmpeg filter
         escaped_srt = safe_srt.replace("\\", "/").replace(":", "\\:")
 
+        def check_filter(fname):
+            try:
+                out = subprocess.run([FFMPEG, "-filters"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+                return bool(re.search(rf"\b{fname}\b", out.stdout))
+            except Exception:
+                return False
+
+        can_hardsub = check_filter("subtitles") or check_filter("ass")
+
         inputs = ["-i", video_path]
         filter_parts = []
         current_v = "0:v"
 
         if hardsub:
-            filter_parts.append(f"[{current_v}]subtitles=filename='{escaped_srt}'[vsub]")
-            current_v = "vsub"
+            if can_hardsub:
+                filter_parts.append(f"[{current_v}]subtitles=filename='{escaped_srt}'[vsub]")
+                current_v = "vsub"
+            else:
+                print("⚠️ FFmpeg không hỗ trợ filter 'subtitles' (libass), bỏ qua hardsub và tiếp tục xuất video.")
 
         if logo_image and os.path.exists(logo_image):
             inputs.extend(["-i", logo_image])
@@ -348,8 +360,25 @@ async def run_dubbing_pipeline(
         if res.returncode != 0 and "h264_videotoolbox" in cmd:
             cmd[cmd.index("h264_videotoolbox")] = "libx264"
             res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-            if res.returncode != 0:
-                raise RuntimeError(f"FFmpeg render thất bại: {res.stderr[-400:]}")
+
+        # Fallback an toàn nếu filter phức tạp thất bại: xuất video cơ bản với âm thanh đã lồng tiếng
+        if res.returncode != 0:
+            print(f"⚠️ Render filter thất bại ({res.stderr[-200:] if res.stderr else ''}), chuyển sang chế độ fallback không filter...")
+            fallback_cmd = [
+                FFMPEG, "-y",
+                "-i", video_path,
+                "-i", mixed_audio,
+                "-map", "0:v",
+                "-map", "1:a",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-shortest",
+                output_path
+            ]
+            fb_res = subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            if fb_res.returncode != 0:
+                raise RuntimeError(f"FFmpeg render thất bại hoàn toàn: {fb_res.stderr[-300:]}")
 
     report("Hoàn tất xuất video!", 100)
     return output_path

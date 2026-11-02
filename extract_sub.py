@@ -22,9 +22,21 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
 PYVIDEOTRANS_DIR = PROJECT_DIR / "pyvideotrans"
-FFMPEG = str(PYVIDEOTRANS_DIR / "ffmpeg" / "ffmpeg")
-if not os.path.exists(FFMPEG):
-    FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
+def get_ffmpeg_binary() -> str:
+    candidates = [
+        str(PYVIDEOTRANS_DIR / "ffmpeg" / "ffmpeg"),
+        "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+        "/usr/local/opt/ffmpeg-full/bin/ffmpeg",
+        shutil.which("ffmpeg-full"),
+        shutil.which("ffmpeg"),
+        "ffmpeg",
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return shutil.which("ffmpeg") or "ffmpeg"
+
+FFMPEG = get_ffmpeg_binary()
 
 
 def check_colab_worker(colab_url: str) -> dict:
