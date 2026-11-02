@@ -36,7 +36,7 @@ from bili_downloader import (
     QUALITY_MAP,
 )
 from extract_sub import extract_subtitles, separate_audio_stems, check_colab_worker, test_colab_ai, FFMPEG
-from dub_video import run_dubbing_pipeline, parse_srt
+from dub_video import run_dubbing_pipeline, process_dubbing_with_colab, parse_srt
 
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
@@ -153,6 +153,7 @@ class DubRenderReq(BaseModel):
     logo_pos: str = "top-right"
     logo_position: Optional[str] = None
     logo_width: int = 150
+    colab_url: Optional[str] = None
 
 
 class SaveSubtitleFileReq(BaseModel):
@@ -717,7 +718,9 @@ async def api_dub_render(req: DubRenderReq):
     if logo_path and not os.path.exists(logo_path):
         logo_path = None
 
-    tid = create_task("Lồng tiếng AI & Xuất Video")
+    colab_active = bool(req.colab_url and req.colab_url.strip())
+    mode_label = " [Colab GPU]" if colab_active else " [Local]"
+    tid = create_task(f"Lồng tiếng AI & Xuất Video{mode_label}")
 
     def worker():
         try:
@@ -728,11 +731,12 @@ async def api_dub_render(req: DubRenderReq):
             use_hardsub = req.burn_hardsub if req.burn_hardsub is not None else req.hardsub
             use_logo_pos = req.logo_position if req.logo_position else req.logo_pos
 
-            asyncio.run(
-                run_dubbing_pipeline(
+            if colab_active:
+                process_dubbing_with_colab(
                     video_path=video_path,
-                    srt_path=vi_srt_path,
+                    srt_content=req.vi_srt_content.strip(),
                     output_path=out_path,
+                    colab_url=req.colab_url.strip(),
                     voice=req.voice,
                     rate=req.rate,
                     pitch=req.pitch,
@@ -744,7 +748,24 @@ async def api_dub_render(req: DubRenderReq):
                     logo_width=req.logo_width,
                     progress_cb=progress_cb,
                 )
-            )
+            else:
+                asyncio.run(
+                    run_dubbing_pipeline(
+                        video_path=video_path,
+                        srt_path=vi_srt_path,
+                        output_path=out_path,
+                        voice=req.voice,
+                        rate=req.rate,
+                        pitch=req.pitch,
+                        bgm_volume=req.bgm_volume,
+                        separate_bgm=req.separate_bgm,
+                        hardsub=use_hardsub,
+                        logo_image=logo_path,
+                        logo_pos=use_logo_pos,
+                        logo_width=req.logo_width,
+                        progress_cb=progress_cb,
+                    )
+                )
             TASKS[tid]["status"] = "done"
             TASKS[tid]["progress"] = 100
             TASKS[tid]["message"] = "Xuất video hoàn chỉnh thành công!"

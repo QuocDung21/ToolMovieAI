@@ -7,11 +7,15 @@ Kế thừa core AI Vocal Separation (Spleeter ONNX), Edge-TTS và FFmpeg (libas
 import os
 import re
 import sys
+import json
+import uuid
 import shutil
 import asyncio
 import tempfile
 import argparse
 import subprocess
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 from extract_sub import separate_audio_stems, FFMPEG
@@ -381,6 +385,134 @@ async def run_dubbing_pipeline(
                 raise RuntimeError(f"FFmpeg render thất bại hoàn toàn: {fb_res.stderr[-300:]}")
 
     report("Hoàn tất xuất video!", 100)
+    return output_path
+
+
+def upload_dubbing_to_colab(
+    url: str,
+    video_path: str,
+    fields: dict,
+    logo_path: str = None,
+    timeout: int = 1800
+) -> dict:
+    """Tải video + phụ đề lên server Colab GPU để thực hiện lồng tiếng & render video hoàn chỉnh."""
+    boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
+
+    with tempfile.TemporaryFile() as tmp:
+        for k, v in fields.items():
+            tmp.write(f"--{boundary}\r\n".encode("utf-8"))
+            tmp.write(f'Content-Disposition: form-data; name="{k}"\r\n\r\n'.encode("utf-8"))
+            tmp.write(f"{v}\r\n".encode("utf-8"))
+
+        v_name = os.path.basename(video_path)
+        tmp.write(f"--{boundary}\r\n".encode("utf-8"))
+        tmp.write(f'Content-Disposition: form-data; name="file"; filename="{v_name}"\r\n'.encode("utf-8"))
+        tmp.write(b"Content-Type: video/mp4\r\n\r\n")
+        with open(video_path, "rb") as vf:
+            shutil.copyfileobj(vf, tmp)
+        tmp.write(b"\r\n")
+
+        if logo_path and os.path.exists(logo_path):
+            l_name = os.path.basename(logo_path)
+            tmp.write(f"--{boundary}\r\n".encode("utf-8"))
+            tmp.write(f'Content-Disposition: form-data; name="logo_file"; filename="{l_name}"\r\n'.encode("utf-8"))
+            tmp.write(b"Content-Type: image/png\r\n\r\n")
+            with open(logo_path, "rb") as lf:
+                shutil.copyfileobj(lf, tmp)
+            tmp.write(b"\r\n")
+
+        tmp.write(f"--{boundary}--\r\n".encode("utf-8"))
+
+        tmp.seek(0, os.SEEK_END)
+        content_len = tmp.tell()
+        tmp.seek(0)
+
+        req = urllib.request.Request(url, data=tmp)
+        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        req.add_header("Content-Length", str(content_len))
+        req.add_header("User-Agent", "ToolMovieAI-Client")
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            err_msg = ""
+            try:
+                err_msg = e.read().decode("utf-8", errors="ignore")[:400]
+            except Exception:
+                pass
+            raise RuntimeError(f"Máy chủ Colab báo lỗi HTTP {e.code}: {err_msg or e.reason}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Không thể kết nối đường truyền Cloudflare: {e.reason}")
+        except OSError as e:
+            raise RuntimeError(f"Đường truyền Colab bị gián đoạn ({e}). Vui lòng kiểm tra lại tab Colab!")
+
+
+def process_dubbing_with_colab(
+    video_path: str,
+    srt_content: str,
+    output_path: str,
+    colab_url: str,
+    voice: str = "vi-VN-NamMinhNeural",
+    rate: str = "+0%",
+    pitch: str = "+0Hz",
+    bgm_volume: float = 0.30,
+    separate_bgm: bool = True,
+    hardsub: bool = True,
+    logo_image: str = None,
+    logo_pos: str = "top-right",
+    logo_width: int = 150,
+    progress_cb=None
+) -> str:
+    """Ủy thác toàn bộ pipeline lồng tiếng và render video lên GPU Google Colab / Kaggle."""
+    colab_base = colab_url.rstrip("/")
+    if progress_cb:
+        progress_cb(f"Đang kết nối tới Colab GPU Worker ({colab_base})...", 10)
+
+    from extract_sub import check_colab_worker
+    check_colab_worker(colab_base)
+
+    if progress_cb:
+        v_size_mb = round(os.path.getsize(video_path) / (1024 * 1024), 1)
+        progress_cb(f"Đang tải video ({v_size_mb}MB) & phụ đề lên Colab GPU...", 20)
+
+    fields = {
+        "srt_content": srt_content,
+        "voice": voice,
+        "rate": rate,
+        "pitch": pitch,
+        "bgm_volume": str(bgm_volume),
+        "separate_bgm": "true" if separate_bgm else "false",
+        "hardsub": "true" if hardsub else "false",
+        "logo_pos": logo_pos,
+        "logo_width": str(logo_width),
+    }
+
+    if progress_cb:
+        progress_cb("Colab GPU đang xử lý tạo giọng Edge-TTS, hòa âm BGM và render video...", 45)
+
+    res = upload_dubbing_to_colab(
+        url=f"{colab_base}/api/dub-video",
+        video_path=video_path,
+        fields=fields,
+        logo_path=logo_image,
+        timeout=1800
+    )
+
+    if not res.get("download_url"):
+        raise RuntimeError(f"Colab không trả về link tải video đã lồng tiếng: {res}")
+
+    if progress_cb:
+        progress_cb("Colab đã render hoàn tất! Đang tải video thành phẩm về máy...", 85)
+
+    dl_url = f"{colab_base}{res['download_url']}"
+    req = urllib.request.Request(dl_url, headers={"User-Agent": "ToolMovieAI-Client"})
+    with urllib.request.urlopen(req, timeout=600) as resp, open(output_path, "wb") as f_out:
+        shutil.copyfileobj(resp, f_out)
+
+    if progress_cb:
+        progress_cb("Hoàn tất xuất video qua Colab GPU!", 100)
+
     return output_path
 
 

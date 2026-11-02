@@ -376,6 +376,24 @@
           <p class="text-xs text-slate-400 mt-0.5">Chọn giọng đọc, âm lượng nhạc nền và đóng dấu logo cá nhân.</p>
         </div>
 
+        <!-- Tùy chọn Tăng tốc Render qua Colab GPU -->
+        <div class="sub-panel p-3.5 border-amber-500/30 bg-amber-950/20 rounded-xl flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <span class="text-base">⚡</span>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-amber-300">Tăng tốc Lồng tiếng & Render qua Colab GPU</span>
+                <span id="colabDubBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium">Cloud GPU</span>
+              </div>
+              <p class="text-[11px] text-slate-400">Tạo giọng đọc Edge-TTS, hòa âm và xuất video trực tiếp trên Cloud Colab (cực nhanh, không tốn tài nguyên máy)</p>
+            </div>
+          </div>
+          <label class="flex items-center gap-2 text-xs text-amber-200 cursor-pointer font-medium">
+            <input id="chkColabDub" type="checkbox" checked class="accent-amber-500 rounded" />
+            <span>Chạy qua Colab GPU</span>
+          </label>
+        </div>
+
         <!-- 1. Giọng đọc -->
         <div class="sub-panel p-4 space-y-3">
           <div class="flex items-center justify-between">
@@ -1571,6 +1589,15 @@ Nội dung SRT cần dịch:
         return showToast("Chưa có Phụ đề Tiếng Việt ở Bước 2!");
       }
 
+      const use_colab = document.getElementById("chkColabDub")?.checked;
+      const colab_url = use_colab ? (document.getElementById("colabUrlInput")?.value?.trim() || localStorage.getItem("toolai_colab_url") || null) : null;
+
+      if (use_colab && !colab_url) {
+        showToast("⚠️ Vui lòng dán link Cloudflare Colab ở Bước 2 để lồng tiếng qua Colab GPU!");
+        switchStep(2);
+        return;
+      }
+
       const payload = {
         video_filename: currentVideoFilename,
         vi_srt_content,
@@ -1583,6 +1610,7 @@ Nội dung SRT cần dịch:
         logo_filename: document.getElementById("logoSelect").value || null,
         logo_position: document.getElementById("logoPosSelect").value,
         logo_width: parseInt(document.getElementById("logoWidthInput").value || "150", 10),
+        colab_url: colab_url,
       };
 
       const res = await fetch("/api/dub-render", {
