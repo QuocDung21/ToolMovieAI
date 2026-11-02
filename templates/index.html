@@ -204,32 +204,32 @@
 
           <div class="flex items-center gap-2">
             <select id="whisperModelSelect" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300">
-              <option value="large-v3">Model: Large-v3 (GPU Cloud)</option>
-              <option value="base" selected>Model: Base</option>
-              <option value="tiny">Model: Tiny</option>
+              <option value="large-v3" selected>Model: Large-v3 (GPU Cloud - Chuẩn nhất)</option>
+              <option value="medium">Model: Medium (Nhanh)</option>
               <option value="small">Model: Small</option>
+              <option value="base">Model: Base</option>
             </select>
             <input id="chkSeparateExtract" type="checkbox" checked class="hidden" />
             <button
               onclick="extractChineseSub()"
-              class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-semibold px-3.5 py-1.5 rounded-lg text-xs transition"
+              class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg text-xs transition flex items-center gap-1.5 shadow-md shadow-amber-950/40"
             >
-              🎙️ Tách Sub Gốc
+              🚀 Tách Sub qua Colab GPU
             </button>
           </div>
         </div>
 
         <!-- GPU Cloud Acceleration Banner (Google Colab & Kaggle) -->
-        <div class="sub-panel p-3.5 border-amber-500/20 bg-amber-950/10 rounded-xl space-y-3">
+        <div class="sub-panel p-3.5 border-amber-500/30 bg-amber-950/20 rounded-xl space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2.5">
               <span class="text-base">⚡</span>
               <div>
                 <div class="flex items-center gap-2">
-                  <span class="text-xs font-bold text-amber-300">Tăng tốc Cloud GPU (Google Colab / Kaggle)</span>
-                  <span id="colabStatusBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">Chưa kích hoạt (Chạy Local M1)</span>
+                  <span class="text-xs font-bold text-amber-300">Máy chủ Cloud GPU (Google Colab / Kaggle)</span>
+                  <span id="colabStatusBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium">Bắt buộc chạy trên Colab GPU</span>
                 </div>
-                <p class="text-[11px] text-slate-400">Tách BGM siêu sạch (Demucs v4) & Nhận diện Whisper Large-v3 (hỗ trợ Dual GPU T4 x2)</p>
+                <p class="text-[11px] text-slate-400">Tách BGM siêu sạch (Demucs v4) & Nhận diện Whisper Large-v3 bằng GPU đám mây (không ngốn CPU máy)</p>
               </div>
             </div>
 
@@ -250,20 +250,16 @@
                 <span>Mở Kaggle</span>
                 <span class="text-xs">↗</span>
               </a>
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" id="chkUseColab" class="sr-only peer" onchange="toggleColabMode()" />
-                <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
-              </label>
             </div>
           </div>
 
-          <!-- Colab/Kaggle Connection Inputs (Toggled) -->
-          <div id="colabConfigBox" class="hidden pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
+          <!-- Colab/Kaggle Connection Inputs (Always Visible) -->
+          <div id="colabConfigBox" class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
             <input
               type="text"
               id="colabUrlInput"
               placeholder="Dán link Cloudflare Colab / Kaggle: https://xxxx.trycloudflare.com"
-              class="flex-1 min-w-[240px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 mono"
+              class="flex-1 min-w-[260px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 mono"
               onchange="saveColabUrl()"
             />
             <button
@@ -1329,24 +1325,6 @@ Nội dung SRT cần dịch:
       });
     }
 
-    function toggleColabMode() {
-      const enabled = document.getElementById("chkUseColab").checked;
-      const box = document.getElementById("colabConfigBox");
-      const modelSelect = document.getElementById("whisperModelSelect");
-      localStorage.setItem("toolai_use_colab", enabled ? "1" : "0");
-
-      if (enabled) {
-        box.classList.remove("hidden");
-        modelSelect.value = "large-v3";
-        checkColabConnection();
-      } else {
-        box.classList.add("hidden");
-        document.getElementById("colabStatusBadge").className = "text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700";
-        document.getElementById("colabStatusBadge").textContent = "Chưa kích hoạt (Chạy Local M1)";
-        modelSelect.value = "base";
-      }
-    }
-
     function saveColabUrl() {
       const url = document.getElementById("colabUrlInput").value.trim();
       localStorage.setItem("toolai_colab_url", url);
@@ -1417,11 +1395,11 @@ Nội dung SRT cần dịch:
       if (!currentVideoFilename) return showToast("Vui lòng chọn video ở Bước 1!");
       const model_size = document.getElementById("whisperModelSelect").value;
       const separate_bgm = document.getElementById("chkSeparateExtract").checked;
-      const use_colab = document.getElementById("chkUseColab").checked;
-      const colab_url = use_colab ? document.getElementById("colabUrlInput").value.trim() : null;
+      const colab_url = document.getElementById("colabUrlInput").value.trim();
 
-      if (use_colab && !colab_url) {
-        return showToast("Vui lòng dán link Cloudflare Colab trước khi tách!");
+      if (!colab_url) {
+        document.getElementById("colabUrlInput").focus();
+        return showToast("⚠️ Phụ đề bắt buộc chạy trên Colab GPU! Vui lòng dán link Cloudflare Colab / Kaggle.");
       }
 
       const res = await fetch("/api/extract-sub", {
@@ -1441,7 +1419,7 @@ Nội dung SRT cần dịch:
         document.getElementById("zhSrtBox").value = result.zh_srt || "";
         updateLineCounts();
         await loadLocalFiles(currentVideoFilename);
-        showToast(use_colab ? "🚀 Đã nhận diện phụ đề qua Colab GPU (Demucs + Whisper)!" : "✅ Đã tách xong phụ đề tiếng Trung!");
+        showToast("🚀 Đã nhận diện phụ đề qua Colab GPU (Demucs + Whisper)!");
       });
     }
 
@@ -1625,15 +1603,11 @@ Nội dung SRT cần dịch:
     window.addEventListener("DOMContentLoaded", () => {
       loadLocalFiles();
 
-      // Phục hồi cấu hình GPU Colab đã lưu
+      // Phục hồi cấu hình GPU Colab đã lưu và tự động kiểm tra kết nối
       const savedColabUrl = localStorage.getItem("toolai_colab_url");
       if (savedColabUrl) {
         document.getElementById("colabUrlInput").value = savedColabUrl;
-      }
-      const savedUseColab = localStorage.getItem("toolai_use_colab") === "1";
-      if (savedUseColab) {
-        document.getElementById("chkUseColab").checked = true;
-        toggleColabMode();
+        checkColabConnection();
       }
     });
   </script>

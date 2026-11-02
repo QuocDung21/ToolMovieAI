@@ -257,7 +257,7 @@ def separate_audio_stems(video_path: str) -> tuple[str, str]:
 def extract_subtitles(
     video_path: str,
     output_srt: str = None,
-    model_size: str = "base",
+    model_size: str = "large-v3",
     separate_bgm: bool = True,
     colab_url: str = None
 ) -> str:
@@ -268,79 +268,23 @@ def extract_subtitles(
         base, _ = os.path.splitext(video_path)
         output_srt = f"{base}_zh.srt"
 
-    # 1. Nếu có Colab URL, ưu tiên xử lý bằng GPU đám mây (Demucs v4 + Faster-Whisper large-v3)
-    if colab_url and colab_url.strip():
-        try:
-            target_model = model_size if model_size in ["large-v3", "medium", "small"] else "large-v3"
-            srt_content, _, _ = process_with_colab(
-                video_path=video_path,
-                colab_url=colab_url.strip(),
-                model_size=target_model,
-                separate_bgm=separate_bgm,
-                output_srt=output_srt
-            )
-            return srt_content
-        except Exception as e:
-            print(f"⚠️ Không thể xử lý qua Colab ({e}). Tự động fallback về chạy trên Mac M1 (chuyển sang model base)...")
-            if model_size == "large-v3":
-                model_size = "base"
+    # Chỉ cho phép chạy trích xuất phụ đề trên Cloud GPU (Colab / Kaggle)
+    colab_url = (colab_url or "").strip()
+    if not colab_url:
+        raise ValueError(
+            "Chức năng trích xuất phụ đề chỉ cho phép chạy trên Cloud GPU (Google Colab / Kaggle). "
+            "Vui lòng cung cấp Colab URL!"
+        )
 
-    # 2. Xử lý cục bộ trên Mac M1
-    audio_input = video_path
-    if separate_bgm:
-        try:
-            vocal_wav, _ = separate_audio_stems(video_path)
-            audio_input = vocal_wav
-        except Exception as e:
-            print(f"⚠️ Bỏ qua bước tách vocal riêng ({e}), dùng trực tiếp audio gốc.")
-
-    print(f"\n🎙️ Đang nhận diện lời thoại tiếng Trung bằng Faster-Whisper ({model_size})...")
-    from faster_whisper import WhisperModel
-
-    # Ưu tiên lấy model đã tải sẵn trong pyvideotrans/models
-    local_model_dir = f"{PYVIDEOTRANS_DIR}/models/models--Systran--faster-whisper-{model_size}"
-    snapshots_dir = os.path.join(local_model_dir, "snapshots")
-    model_path_or_name = model_size
-    if os.path.exists(snapshots_dir):
-        snaps = [os.path.join(snapshots_dir, d) for d in os.listdir(snapshots_dir) if not d.startswith(".")]
-        if snaps:
-            model_path_or_name = snaps[0]
-
-    model = WhisperModel(model_path_or_name, device="cpu", compute_type="float32")
-
-    segments, info = model.transcribe(
-        audio_input,
-        language="zh",
-        vad_filter=True,
-        beam_size=5,
-        condition_on_previous_text=False,
+    target_model = model_size if model_size in ["large-v3", "medium", "small", "base"] else "large-v3"
+    print(f"\n🚀 Đang gửi yêu cầu trích xuất phụ đề & tách BGM tới Colab GPU ({colab_url})...")
+    srt_content, _, _ = process_with_colab(
+        video_path=video_path,
+        colab_url=colab_url,
+        model_size=target_model,
+        separate_bgm=separate_bgm,
+        output_srt=output_srt
     )
-
-    lines = []
-    for idx, seg in enumerate(segments, start=1):
-        start = seg.start
-        end = seg.end
-        text = seg.text.strip()
-
-        start_h = int(start // 3600)
-        start_m = int((start % 3600) // 60)
-        start_s = int(start % 60)
-        start_ms = int(round((start - int(start)) * 1000))
-
-        end_h = int(end // 3600)
-        end_m = int((end % 3600) // 60)
-        end_s = int(end % 60)
-        end_ms = int(round((end - int(end)) * 1000))
-
-        time_line = f"{start_h:02d}:{start_m:02d}:{start_s:02d},{start_ms:03d} --> {end_h:02d}:{end_m:02d}:{end_s:02d},{end_ms:03d}"
-        lines.append(f"{idx}\n{time_line}\n{text}\n")
-        print(f"[{time_line}] {text}")
-
-    srt_content = "\n".join(lines)
-    with open(output_srt, "w", encoding="utf-8") as f:
-        f.write(srt_content)
-
-    print(f"\n✅ Xuất file phụ đề tiếng Trung thành công: {os.path.abspath(output_srt)}")
     return srt_content
 
 
@@ -348,9 +292,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Trích xuất phụ đề tiếng Trung từ video ra file .srt")
     parser.add_argument("video", help="Đường dẫn file video (.mp4)")
     parser.add_argument("-o", "--output", help="Đường dẫn file .srt đầu ra (mặc định: cùng tên _zh.srt)")
-    parser.add_argument("-m", "--model", default="base", choices=["tiny", "base", "small", "medium", "large-v3"], help="Mô hình Whisper (mặc định: base)")
+    parser.add_argument("-m", "--model", default="large-v3", choices=["tiny", "base", "small", "medium", "large-v3"], help="Mô hình Whisper (mặc định: large-v3)")
     parser.add_argument("--no-separate", action="store_true", help="Không tách nhạc nền trước khi nhận diện")
-    parser.add_argument("--colab-url", help="URL máy chủ Colab GPU Worker (ví dụ: https://xxx.trycloudflare.com)")
+    parser.add_argument("--colab-url", required=True, help="URL máy chủ Colab GPU Worker (ví dụ: https://xxx.trycloudflare.com)")
     args = parser.parse_args()
 
     extract_subtitles(args.video, args.output, args.model, separate_bgm=not args.no_separate, colab_url=args.colab_url)
