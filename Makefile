@@ -29,7 +29,10 @@ run: start
 start:
 	@echo "🚀 Đang khởi động ToolMovieAI Web Studio..."
 	@echo "🌐 Truy cập giao diện tại: http://$(HOST):$(PORT)"
-	@if [ -d "$(PYVIDEOTRANS_DIR)" ]; then \
+	@if [ -f "$(PROJECT_DIR)/.venv/bin/activate" ]; then \
+		. "$(PROJECT_DIR)/.venv/bin/activate"; \
+	fi; \
+	if [ -d "$(PYVIDEOTRANS_DIR)" ]; then \
 		cd "$(PYVIDEOTRANS_DIR)" && uv run --offline python "$(PROJECT_DIR)/web_app.py"; \
 	else \
 		HOST="$(HOST)" PORT="$(PORT)" python3 "$(PROJECT_DIR)/web_app.py"; \

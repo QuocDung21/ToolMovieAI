@@ -18,12 +18,93 @@ import time
 import re
 import asyncio
 import json
+import glob
+import ctypes
+import site
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+def setup_cuda_libraries():
+    """
+    Tự động quét và nạp các thư viện CUDA/cuBLAS/cuDNN (libcublas.so.12, libcublasLt.so.12, ...)
+    vào global address space (RTLD_GLOBAL) để ctranslate2 / faster-whisper hoạt động trơn tru
+    trên Google Colab / Kaggle mà không bị lỗi 'Library libcublas.so.12 is not found'.
+    """
+    libs_to_load = [
+        "libcublasLt.so.12",
+        "libcublas.so.12",
+        "libcudnn.so.9",
+        "libcudnn.so.8",
+        "libcudnn_ops_infer.so.8",
+    ]
+
+    search_dirs = []
+
+    try:
+        for s in site.getsitepackages():
+            for p in glob.glob(os.path.join(s, "nvidia", "*", "lib")):
+                if os.path.isdir(p):
+                    search_dirs.append(p)
+            torch_lib = os.path.join(s, "torch", "lib")
+            if os.path.isdir(torch_lib):
+                search_dirs.append(torch_lib)
+    except Exception:
+        pass
+
+    system_paths = [
+        "/usr/local/cuda/lib64",
+        "/usr/local/cuda-12/lib64",
+        "/usr/local/cuda-12.2/lib64",
+        "/usr/local/cuda-12.1/lib64",
+        "/usr/local/cuda-12.0/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/local/nvidia/lib64",
+        "/usr/local/nvidia/lib",
+    ]
+    for sp in system_paths:
+        if os.path.isdir(sp):
+            search_dirs.append(sp)
+
+    # Cập nhật LD_LIBRARY_PATH
+    current_ld = os.environ.get("LD_LIBRARY_PATH", "")
+    new_dirs = [d for d in search_dirs if d not in current_ld]
+    if new_dirs:
+        os.environ["LD_LIBRARY_PATH"] = ":".join(new_dirs) + (f":{current_ld}" if current_ld else "")
+
+    # Preload bằng ctypes RTLD_GLOBAL
+    for lib_name in libs_to_load:
+        loaded = False
+        try:
+            ctypes.CDLL(lib_name, mode=ctypes.RTLD_GLOBAL)
+            loaded = True
+        except Exception:
+            pass
+
+        if not loaded:
+            for s_dir in search_dirs:
+                candidate = os.path.join(s_dir, lib_name)
+                if os.path.exists(candidate):
+                    try:
+                        ctypes.CDLL(candidate, mode=ctypes.RTLD_GLOBAL)
+                        loaded = True
+                        break
+                    except Exception:
+                        pass
+                if not loaded:
+                    matches = glob.glob(os.path.join(s_dir, f"{lib_name}*"))
+                    if matches:
+                        try:
+                            ctypes.CDLL(matches[0], mode=ctypes.RTLD_GLOBAL)
+                            loaded = True
+                            break
+                        except Exception:
+                            pass
+
+setup_cuda_libraries()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -87,28 +168,104 @@ def get_gpu_info():
     return {"available": False, "name": "CPU", "device_count": 0, "total_vram_gb": 0, "free_vram_gb": 0}
 
 
-def get_whisper_model(model_size: str = "large-v3"):
+def get_whisper_model(model_size: str = "large-v3", force_cpu: bool = False):
+    setup_cuda_libraries()
     from faster_whisper import WhisperModel
     import torch
 
     _, whisper_device, _ = get_device_allocation()
-    compute_type = "float16" if "cuda" in whisper_device else "int8"
-    cache_key = f"{model_size}_{whisper_device}"
+    if force_cpu or "cuda" not in whisper_device:
+        whisper_device = "cpu"
+        compute_type = "int8"
+    else:
+        compute_type = "float16"
+
+    cache_key = f"{model_size}_{whisper_device}_{compute_type}"
 
     if cache_key not in WHISPER_MODELS:
         logger.info("MODEL loading Faster-Whisper %s (%s - %s)", model_size, whisper_device, compute_type)
         device_type = "cuda" if "cuda" in whisper_device else "cpu"
         device_index = int(whisper_device.split(":")[1]) if ":" in whisper_device else 0
-        WHISPER_MODELS[cache_key] = WhisperModel(
-            model_size,
-            device=device_type,
-            device_index=device_index,
-            compute_type=compute_type
-        )
+        try:
+            WHISPER_MODELS[cache_key] = WhisperModel(
+                model_size,
+                device=device_type,
+                device_index=device_index,
+                compute_type=compute_type
+            )
+        except Exception as e:
+            if device_type == "cuda":
+                logger.warning("Không thể load Whisper trên CUDA (%s), fallback sang CPU int8...", e)
+                return get_whisper_model(model_size, force_cpu=True)
+            raise
         logger.info("MODEL ready Faster-Whisper %s", model_size)
     else:
         logger.info("MODEL cache hit Faster-Whisper %s", model_size)
     return WHISPER_MODELS[cache_key]
+
+
+def transcribe_with_whisper(
+    model_size: str,
+    audio_path: str,
+    language: str = "zh",
+    prompt: Optional[str] = None
+):
+    """
+    Nhận diện giọng nói an toàn với Faster-Whisper:
+    Thử chạy trên GPU CUDA trước; nếu gặp lỗi runtime CUDA (như libcublas.so.12 missing),
+    tự động nạp lại CUDA libraries và fallback sang CPU (int8) để đảm bảo tác vụ không bao giờ bị dừng giữa chừng.
+    """
+    setup_cuda_libraries()
+    model = get_whisper_model(model_size)
+    try:
+        segments, info = model.transcribe(
+            audio_path,
+            language=language,
+            initial_prompt=prompt,
+            beam_size=5,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=450),
+        )
+        seg_list = []
+        srt_blocks = []
+        idx = 1
+        for seg in segments:
+            text = seg.text.strip()
+            if not text:
+                continue
+            start_str = format_timestamp(seg.start)
+            end_str = format_timestamp(seg.end)
+            srt_blocks.append(f"{idx}\n{start_str} --> {end_str}\n{text}\n")
+            seg_list.append({"start": seg.start, "end": seg.end, "text": text})
+            idx += 1
+        return srt_blocks, seg_list, info
+    except RuntimeError as e:
+        err_msg = str(e).lower()
+        if "libcublas" in err_msg or "cuda" in err_msg:
+            logger.warning("Whisper CUDA error (%s), chuyển sang CPU fallback để hoàn thành tác vụ...", e)
+            cpu_model = get_whisper_model(model_size, force_cpu=True)
+            segments, info = cpu_model.transcribe(
+                audio_path,
+                language=language,
+                initial_prompt=prompt,
+                beam_size=5,
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=450),
+            )
+            seg_list = []
+            srt_blocks = []
+            idx = 1
+            for seg in segments:
+                text = seg.text.strip()
+                if not text:
+                    continue
+                start_str = format_timestamp(seg.start)
+                end_str = format_timestamp(seg.end)
+                srt_blocks.append(f"{idx}\n{start_str} --> {end_str}\n{text}\n")
+                seg_list.append({"start": seg.start, "end": seg.end, "text": text})
+                idx += 1
+            return srt_blocks, seg_list, info
+        raise
 
 
 def format_timestamp(seconds: float) -> str:
@@ -210,31 +367,15 @@ async def transcribe(
         shutil.copyfileobj(file.file, f)
 
     try:
-        model = get_whisper_model(model_size)
         logger.info("TRANSCRIBE start session=%s", session_id)
         prompt = initial_prompt or "以下是中文普通话对白，请使用简体中文输出字幕。" if language == "zh" else None
 
-        segments, info = model.transcribe(
-            input_path,
+        srt_blocks, seg_list, info = transcribe_with_whisper(
+            model_size=model_size,
+            audio_path=input_path,
             language=language,
-            initial_prompt=prompt,
-            beam_size=5,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=450),
+            prompt=prompt
         )
-
-        srt_blocks = []
-        seg_list = []
-        idx = 1
-        for seg in segments:
-            text = seg.text.strip()
-            if not text:
-                continue
-            start_str = format_timestamp(seg.start)
-            end_str = format_timestamp(seg.end)
-            srt_blocks.append(f"{idx}\n{start_str} --> {end_str}\n{text}\n")
-            seg_list.append({"start": seg.start, "end": seg.end, "text": text})
-            idx += 1
 
         srt_content = "\n".join(srt_blocks)
         logger.info("TRANSCRIBE complete session=%s segments=%d duration=%.2fs", session_id, len(seg_list), info.duration)
@@ -315,31 +456,17 @@ async def process_all(
                 logger.warning("DEMUCS failed session=%s detail=%s", session_id, res.stderr[-500:])
 
         logger.info("WHISPER start session=%s model=%s", session_id, model_size)
-        model = get_whisper_model(model_size)
         prompt = "以下是中文普通话对白，请使用简体中文输出字幕。" if language == "zh" else None
 
-        segments, info = model.transcribe(
-            audio_for_whisper,
+        srt_blocks, _, info = transcribe_with_whisper(
+            model_size=model_size,
+            audio_path=audio_for_whisper,
             language=language,
-            initial_prompt=prompt,
-            beam_size=5,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=450),
+            prompt=prompt
         )
 
-        srt_blocks = []
-        idx = 1
-        for seg in segments:
-            text = seg.text.strip()
-            if not text:
-                continue
-            start_str = format_timestamp(seg.start)
-            end_str = format_timestamp(seg.end)
-            srt_blocks.append(f"{idx}\n{start_str} --> {end_str}\n{text}\n")
-            idx += 1
-
         srt_content = "\n".join(srt_blocks)
-        logger.info("WHISPER complete session=%s segments=%d duration=%.2fs", session_id, idx - 1, info.duration)
+        logger.info("WHISPER complete session=%s segments=%d duration=%.2fs", session_id, len(srt_blocks), info.duration)
 
         return {
             "session_id": session_id,
