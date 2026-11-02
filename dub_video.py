@@ -94,8 +94,25 @@ async def generate_speech_for_segment(
     import edge_tts
 
     temp_mp3 = output_wav + ".temp.mp3"
-    comm = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
-    await comm.save(temp_mp3)
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            comm = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+            await comm.save(temp_mp3)
+            if not os.path.exists(temp_mp3) or os.path.getsize(temp_mp3) == 0:
+                raise RuntimeError("Edge-TTS returned an empty audio file")
+            break
+        except Exception as error:
+            last_error = error
+            if os.path.exists(temp_mp3):
+                os.remove(temp_mp3)
+            if attempt < 3:
+                await asyncio.sleep(attempt)
+    else:
+        raise RuntimeError(
+            f"Không nhận được audio từ Edge-TTS sau 3 lần thử "
+            f"(voice={voice}, text={text[:80]!r}): {last_error}"
+        ) from last_error
 
     raw_dur = get_media_duration(temp_mp3)
     if raw_dur <= 0:
@@ -118,7 +135,11 @@ async def generate_speech_for_segment(
             output_wav
         ]
 
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0 or not os.path.exists(output_wav) or os.path.getsize(output_wav) == 0:
+        raise RuntimeError(
+            f"FFmpeg không tạo được audio lồng tiếng: {result.stderr[-300:]}"
+        )
     if os.path.exists(temp_mp3):
         os.remove(temp_mp3)
 

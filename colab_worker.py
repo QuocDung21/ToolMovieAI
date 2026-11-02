@@ -13,12 +13,22 @@ import uuid
 import shutil
 import tempfile
 import subprocess
+import logging
+import time
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%H:%M:%S",
+    force=True,
+)
+logger = logging.getLogger("toolmovieai-worker")
 
 app = FastAPI(title="ToolMovieAI GPU Worker")
 
@@ -83,7 +93,7 @@ def get_whisper_model(model_size: str = "large-v3"):
     cache_key = f"{model_size}_{whisper_device}"
 
     if cache_key not in WHISPER_MODELS:
-        print(f"🔥 Đang nạp mô hình Faster-Whisper {model_size} ({whisper_device} - {compute_type})...")
+        logger.info("MODEL loading Faster-Whisper %s (%s - %s)", model_size, whisper_device, compute_type)
         device_type = "cuda" if "cuda" in whisper_device else "cpu"
         device_index = int(whisper_device.split(":")[1]) if ":" in whisper_device else 0
         WHISPER_MODELS[cache_key] = WhisperModel(
@@ -92,6 +102,9 @@ def get_whisper_model(model_size: str = "large-v3"):
             device_index=device_index,
             compute_type=compute_type
         )
+        logger.info("MODEL ready Faster-Whisper %s", model_size)
+    else:
+        logger.info("MODEL cache hit Faster-Whisper %s", model_size)
     return WHISPER_MODELS[cache_key]
 
 
@@ -107,6 +120,7 @@ def format_timestamp(seconds: float) -> str:
 @app.get("/health")
 async def health():
     gpu = get_gpu_info()
+    logger.info("HEALTH status=ready gpu=%s", gpu.get("name", "unknown"))
     return {
         "status": "ready",
         "service": "ToolMovieAI Colab GPU Acceleration",
@@ -121,6 +135,8 @@ async def separate_bgm(file: UploadFile = File(...)):
     Tách Vocal và BGM bằng Demucs v4 (htdemucs) trên CUDA.
     """
     session_id = str(uuid.uuid4())[:8]
+    started = time.monotonic()
+    logger.info("REQUEST separate-bgm session=%s filename=%s", session_id, file.filename or "audio")
     session_dir = os.path.join(STORAGE_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
 
@@ -158,7 +174,10 @@ async def separate_bgm(file: UploadFile = File(...)):
             "bgm_url": f"/api/download/{session_id}/bgm.wav",
         }
     except Exception as e:
+        logger.exception("ERROR separate-bgm session=%s", session_id)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        logger.info("REQUEST complete separate-bgm session=%s elapsed_ms=%d", session_id, round((time.monotonic() - started) * 1000))
 
 
 @app.post("/api/transcribe")
@@ -172,6 +191,14 @@ async def transcribe(
     Nhận diện giọng nói đa ngôn ngữ bằng Faster-Whisper GPU.
     """
     session_id = str(uuid.uuid4())[:8]
+    started = time.monotonic()
+    logger.info(
+        "REQUEST transcribe session=%s filename=%s model=%s language=%s",
+        session_id,
+        file.filename or "audio",
+        model_size,
+        language,
+    )
     session_dir = os.path.join(STORAGE_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
 
@@ -181,6 +208,7 @@ async def transcribe(
 
     try:
         model = get_whisper_model(model_size)
+        logger.info("TRANSCRIBE start session=%s", session_id)
         prompt = initial_prompt or "以下是中文普通话对白，请使用简体中文输出字幕。" if language == "zh" else None
 
         segments, info = model.transcribe(
@@ -206,6 +234,7 @@ async def transcribe(
             idx += 1
 
         srt_content = "\n".join(srt_blocks)
+        logger.info("TRANSCRIBE complete session=%s segments=%d duration=%.2fs", session_id, len(seg_list), info.duration)
         return {
             "session_id": session_id,
             "detected_language": info.language,
@@ -215,7 +244,10 @@ async def transcribe(
             "segments": seg_list,
         }
     except Exception as e:
+        logger.exception("ERROR transcribe session=%s", session_id)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        logger.info("REQUEST complete transcribe session=%s elapsed_ms=%d", session_id, round((time.monotonic() - started) * 1000))
 
 
 @app.post("/api/process-all")
@@ -233,6 +265,14 @@ async def process_all(
     4. Trả về cả SRT và link tải BGM chất lượng cao.
     """
     session_id = str(uuid.uuid4())[:8]
+    started = time.monotonic()
+    logger.info(
+        "REQUEST process-all session=%s filename=%s model=%s separate_bgm=%s",
+        session_id,
+        file.filename or "audio",
+        model_size,
+        separate_bgm,
+    )
     session_dir = os.path.join(STORAGE_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
 
@@ -247,7 +287,7 @@ async def process_all(
         has_bgm = False
 
         if separate_bgm:
-            print(f"🎵 [Cloud GPU] Đang chạy Demucs v4 tách Vocal & BGM (thiết bị: {demucs_device})...")
+            logger.info("DEMUCS start session=%s device=%s", session_id, demucs_device)
             cmd = [
                 sys.executable, "-m", "demucs.separate",
                 "-n", "htdemucs",
@@ -267,10 +307,11 @@ async def process_all(
                 shutil.copy2(bgm_src, final_bgm)
                 audio_for_whisper = final_vocal
                 has_bgm = True
+                logger.info("DEMUCS complete session=%s", session_id)
             else:
-                print(f"⚠️ Demucs cảnh báo: {res.stderr}")
+                logger.warning("DEMUCS failed session=%s detail=%s", session_id, res.stderr[-500:])
 
-        print(f"🎙️ [Cloud GPU] Đang chạy Faster-Whisper ({model_size})...")
+        logger.info("WHISPER start session=%s model=%s", session_id, model_size)
         model = get_whisper_model(model_size)
         prompt = "以下是中文普通话对白，请使用简体中文输出字幕。" if language == "zh" else None
 
@@ -295,6 +336,7 @@ async def process_all(
             idx += 1
 
         srt_content = "\n".join(srt_blocks)
+        logger.info("WHISPER complete session=%s segments=%d duration=%.2fs", session_id, idx - 1, info.duration)
 
         return {
             "session_id": session_id,
@@ -307,7 +349,10 @@ async def process_all(
             "vocal_url": f"/api/download/{session_id}/vocal.wav" if has_bgm else None,
         }
     except Exception as e:
+        logger.exception("ERROR process-all session=%s", session_id)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        logger.info("REQUEST complete process-all session=%s elapsed_ms=%d", session_id, round((time.monotonic() - started) * 1000))
 
 
 @app.get("/api/download/{session_id}/{filename}")
@@ -320,18 +365,14 @@ async def download_file(session_id: str, filename: str):
 
 def run_tunnel(port: int = 8000):
     """Khởi chạy Cloudflare Tunnel miễn phí, không cần tài khoản hay token."""
-    print("🌐 Đang khởi tạo Cloudflare Tunnel...")
+    logger.info("TUNNEL starting port=%d", port)
     try:
         from pycloudflared import try_cloudflare
         tunnel_url = try_cloudflare(port=port)
-        print("\n" + "=" * 65)
-        print("🚀 TOOLMOVIEAI COLAB GPU WORKER ĐÃ HOÀNG TẤT KHỞI TẠO!")
-        print(f"👉 COPY LINK NÀY DÁN VÀO WEB STUDIO TRÊN MAC:")
-        print(f"   {tunnel_url}")
-        print("=" * 65 + "\n")
+        logger.info("TUNNEL ready url=%s", tunnel_url)
         return tunnel_url
     except Exception as e:
-        print(f"⚠️ Chưa có pycloudflared ({e}), chạy local port {port}.")
+        logger.exception("TUNNEL failed; falling back to local port=%d", port)
         return f"http://127.0.0.1:{port}"
 
 
@@ -341,5 +382,6 @@ if __name__ == "__main__":
 
     port = 8000
     # In môi trường Colab, mở tunnel trong background thread
+    logger.info("SERVER starting host=0.0.0.0 port=%d", port)
     threading.Thread(target=lambda: run_tunnel(port), daemon=True).start()
     uvicorn.run(app, host="0.0.0.0", port=port)

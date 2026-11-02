@@ -16,6 +16,7 @@ import urllib.error
 import urllib.parse
 import tempfile
 import time
+import math
 import wave
 from pathlib import Path
 
@@ -45,7 +46,13 @@ def test_colab_ai(colab_url: str, model_size: str = "tiny") -> dict:
             audio.setnchannels(1)
             audio.setsampwidth(2)
             audio.setframerate(16_000)
-            audio.writeframes(b"\0\0" * 16_000)
+            # Use a quiet tone instead of a zero-length/silent payload. Some
+            # Whisper/FFmpeg builds reject fully silent synthetic input.
+            frames = bytearray()
+            for index in range(32_000):
+                sample = int(800 * math.sin(2 * math.pi * 440 * index / 16_000))
+                frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
+            audio.writeframes(frames)
 
         started = time.monotonic()
         result = upload_file_multipart(
