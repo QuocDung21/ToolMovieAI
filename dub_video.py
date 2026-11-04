@@ -7,11 +7,13 @@ Kế thừa core AI Vocal Separation (Spleeter ONNX), Edge-TTS và FFmpeg (libas
 import os
 import re
 import sys
+import time
 import json
 import uuid
 import shutil
 import asyncio
 import tempfile
+import threading
 import argparse
 import subprocess
 import urllib.request
@@ -494,29 +496,72 @@ def process_dubbing_with_colab(
     }
 
     if progress_cb:
-        progress_cb(f"[{gpu_name}] Đang tạo giọng Edge-TTS, tách BGM Demucs v4 & render video...", 45)
+        progress_cb(f"[{gpu_name}] Đang khởi tạo pipeline tại Colab GPU...", 35)
 
-    res = upload_dubbing_to_colab(
-        url=f"{colab_base}/api/dub-video",
-        video_path=video_path,
-        fields=fields,
-        logo_path=logo_image,
-        timeout=1800
-    )
+    # Dynamic progress ticker khi Colab đang xử lý Demucs v4 + Edge-TTS + NVENC
+    stop_event = threading.Event()
+    def dub_ticker():
+        stages = [
+            (5, 45, f"[{gpu_name}] Colab đang tách nhạc nền BGM (Demucs v4)..."),
+            (18, 58, f"[{gpu_name}] Colab đang tạo giọng đọc tiếng Việt (Edge-TTS AI)..."),
+            (32, 68, f"[{gpu_name}] Colab đang trộn âm thanh và căn khớp từng đoạn thoại..."),
+            (46, 76, f"[{gpu_name}] Colab đang render video với GPU NVENC siêu tốc..."),
+            (65, 82, f"[{gpu_name}] Colab đang hoàn thiện đóng gói video thành phẩm..."),
+        ]
+        start_t = time.time()
+        curr_idx = 0
+        while not stop_event.is_set():
+            elapsed = time.time() - start_t
+            if curr_idx < len(stages):
+                delay, pct, msg = stages[curr_idx]
+                if elapsed >= delay:
+                    if progress_cb:
+                        progress_cb(msg, pct)
+                    curr_idx += 1
+            time.sleep(1)
+
+    t_thread = threading.Thread(target=dub_ticker, daemon=True)
+    t_thread.start()
+
+    try:
+        res = upload_dubbing_to_colab(
+            url=f"{colab_base}/api/dub-video",
+            video_path=video_path,
+            fields=fields,
+            logo_path=logo_image,
+            timeout=1800
+        )
+    finally:
+        stop_event.set()
+        t_thread.join(timeout=1.0)
 
     if not res.get("download_url"):
         raise RuntimeError(f"Colab không trả về link tải video đã lồng tiếng: {res}")
 
     if progress_cb:
-        progress_cb("Colab đã render hoàn tất! Đang tải video thành phẩm về máy...", 85)
+        progress_cb(f"[{gpu_name}] Colab đã render xong! Bắt đầu tải video về máy...", 85)
 
     dl_url = f"{colab_base}{res['download_url']}"
     last_dl_err = None
     for attempt in range(1, 4):
         try:
             req = urllib.request.Request(dl_url, headers={"User-Agent": "ToolMovieAI-Client"})
-            with urllib.request.urlopen(req, timeout=600) as resp, open(output_path, "wb") as f_out:
-                shutil.copyfileobj(resp, f_out)
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                total_len = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                chunk_size = 256 * 1024  # 256KB
+                with open(output_path, "wb") as f_out:
+                    while True:
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        f_out.write(chunk)
+                        downloaded += len(chunk)
+                        if total_len > 0 and progress_cb:
+                            pct = 85 + int((downloaded / total_len) * 14)  # 85% -> 99%
+                            dl_mb = downloaded / (1024 * 1024)
+                            tot_mb = total_len / (1024 * 1024)
+                            progress_cb(f"[{gpu_name}] Đang tải video thành phẩm: {dl_mb:.1f}MB/{tot_mb:.1f}MB ({pct}%)...", pct)
             last_dl_err = None
             break
         except Exception as e:

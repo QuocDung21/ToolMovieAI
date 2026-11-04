@@ -16,6 +16,7 @@ import urllib.error
 import urllib.parse
 import tempfile
 import time
+import threading
 import math
 import wave
 from pathlib import Path
@@ -159,7 +160,8 @@ def process_with_colab(
     colab_url: str,
     model_size: str = "large-v3",
     separate_bgm: bool = True,
-    output_srt: str = None
+    output_srt: str = None,
+    progress_cb = None
 ) -> tuple[str, str, str]:
     """
     Trích xuất âm thanh từ video cục bộ, gửi lên Colab GPU để tách BGM (Demucs v4)
@@ -173,15 +175,18 @@ def process_with_colab(
     instr_file = f"{base}_bgm.wav"
 
     colab_base = clean_colab_url(colab_url)
-    print(f"📡 Đang kết nối tới Colab GPU Worker ({colab_base})...")
+    if progress_cb:
+        progress_cb(f"Đang kết nối tới Colab GPU Worker ({colab_base})...", 10)
 
     # Kiểm tra health trước khi trích xuất và tải file
     try:
         health = check_colab_worker(colab_base)
         gpu_name = health.get("gpu", {}).get("name", "GPU")
-        print(f"🟢 Colab GPU sẵn sàng: {gpu_name}")
     except Exception as e:
         raise RuntimeError(f"Máy chủ Colab chưa phản hồi hoặc link Cloudflare đã hết hạn ({e}). Vui lòng kiểm tra lại tab Colab!")
+
+    if progress_cb:
+        progress_cb(f"[{gpu_name}] Đang nén âm thanh 16kHz siêu nhẹ...", 20)
 
     # 1. Trích xuất audio nén nhẹ (16kHz mono/stereo) để upload siêu tốc
     temp_raw = f"{base}_temp_upload.wav"
@@ -191,33 +196,69 @@ def process_with_colab(
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
     try:
-        print(f"🚀 [Colab GPU] Đang tải audio ({round(os.path.getsize(temp_raw)/(1024*1024), 1)}MB) lên Colab...")
+        raw_mb = round(os.path.getsize(temp_raw) / (1024 * 1024), 1)
+        if progress_cb:
+            progress_cb(f"[{gpu_name}] Đang tải audio ({raw_mb}MB) lên Colab GPU...", 30)
+
         fields = {
             "model_size": model_size,
             "language": "zh",
             "separate_bgm": "true" if separate_bgm else "false",
         }
-        res = upload_file_multipart(f"{colab_base}/api/process-all", temp_raw, fields)
+
+        # Dynamic progress ticker khi Colab đang xử lý Demucs v4 + Whisper
+        stop_event = threading.Event()
+        def ticker():
+            stages = [
+                (4, 40, f"[{gpu_name}] Colab đang tách bỏ giọng nói tiếng Trung (Demucs v4)..."),
+                (14, 55, f"[{gpu_name}] Colab đang nhận diện phụ đề tiếng Trung (Whisper {model_size})..."),
+                (28, 70, f"[{gpu_name}] Colab đang tinh chỉnh mốc thời gian phụ đề timestamp..."),
+                (42, 78, f"[{gpu_name}] Colab đang hoàn tất xử lý kết quả..."),
+            ]
+            start_t = time.time()
+            curr_idx = 0
+            while not stop_event.is_set():
+                elapsed = time.time() - start_t
+                if curr_idx < len(stages):
+                    delay, pct, msg = stages[curr_idx]
+                    if elapsed >= delay:
+                        if progress_cb:
+                            progress_cb(msg, pct)
+                        curr_idx += 1
+                time.sleep(1)
+
+        t_thread = threading.Thread(target=ticker, daemon=True)
+        t_thread.start()
+
+        try:
+            res = upload_file_multipart(f"{colab_base}/api/process-all", temp_raw, fields)
+        finally:
+            stop_event.set()
+            t_thread.join(timeout=1.0)
 
         srt_content = res.get("srt_content", "")
         with open(output_srt, "w", encoding="utf-8") as f:
             f.write(srt_content)
-        print(f"✅ [Colab GPU] Đã nhận diện xong phụ đề tiếng Trung ({res.get('duration', 0)}s)!")
 
         # 2. Tải file BGM tách sạch (Demucs v4) về máy Mac
         if res.get("has_bgm") and res.get("bgm_url"):
             bgm_dl_url = f"{colab_base}{res['bgm_url']}"
-            print("🎶 [Colab GPU] Đang tải file BGM chất lượng cao (Demucs v4) về cache...")
+            if progress_cb:
+                progress_cb(f"[{gpu_name}] Đang tải file BGM chất lượng cao (Demucs v4) về máy...", 85)
             req = urllib.request.Request(bgm_dl_url, headers={"User-Agent": "ToolMovieAI-Client"})
             with urllib.request.urlopen(req, timeout=120) as resp, open(instr_file, "wb") as f_out:
                 shutil.copyfileobj(resp, f_out)
-            print(f"✅ Đã lưu file BGM tách sạch: {os.path.basename(instr_file)}")
 
         if res.get("vocal_url"):
             vocal_dl_url = f"{colab_base}{res['vocal_url']}"
+            if progress_cb:
+                progress_cb(f"[{gpu_name}] Đang lưu trữ file vocal tách riêng...", 95)
             req = urllib.request.Request(vocal_dl_url, headers={"User-Agent": "ToolMovieAI-Client"})
             with urllib.request.urlopen(req, timeout=120) as resp, open(vocal_file, "wb") as f_out:
                 shutil.copyfileobj(resp, f_out)
+
+        if progress_cb:
+            progress_cb("Trích xuất phụ đề & BGM qua Colab GPU hoàn tất!", 100)
 
         return srt_content, vocal_file, instr_file
     finally:
@@ -289,7 +330,8 @@ def extract_subtitles(
     output_srt: str = None,
     model_size: str = "large-v3",
     separate_bgm: bool = True,
-    colab_url: str = None
+    colab_url: str = None,
+    progress_cb = None
 ) -> str:
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Không tìm thấy file: {video_path}")
@@ -313,7 +355,8 @@ def extract_subtitles(
         colab_url=colab_url,
         model_size=target_model,
         separate_bgm=separate_bgm,
-        output_srt=output_srt
+        output_srt=output_srt,
+        progress_cb=progress_cb
     )
     return srt_content
 

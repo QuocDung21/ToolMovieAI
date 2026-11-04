@@ -546,8 +546,9 @@ async def api_extract_sub(req: ExtractSubReq):
             base, _ = os.path.splitext(video_path)
             output_srt = f"{base}_zh.srt"
 
-            TASKS[tid]["message"] = f"Đang gửi audio lên Cloud GPU Colab ({req.model_size} + Demucs v4)..."
-            TASKS[tid]["progress"] = 25
+            def progress_cb(msg: str, pct: int):
+                TASKS[tid]["message"] = msg
+                TASKS[tid]["progress"] = pct
 
             srt_content = extract_subtitles(
                 video_path,
@@ -555,6 +556,7 @@ async def api_extract_sub(req: ExtractSubReq):
                 model_size=req.model_size,
                 separate_bgm=req.separate_bgm,
                 colab_url=colab_url,
+                progress_cb=progress_cb,
             )
             TASKS[tid]["status"] = "done"
             TASKS[tid]["progress"] = 100

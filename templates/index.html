@@ -691,16 +691,29 @@
         </div>
 
         <!-- Progress Box -->
-        <div id="globalTaskBox" class="hidden bg-slate-900 border border-sky-500/30 rounded-xl p-3 space-y-2">
+        <div id="globalTaskBox" class="hidden bg-slate-900/95 border border-sky-500/40 rounded-xl p-3.5 space-y-2.5 shadow-lg shadow-sky-950/20 backdrop-blur">
           <div class="flex items-center justify-between text-xs">
-            <div class="flex items-center gap-2">
-              <div class="animate-spin w-3.5 h-3.5 border-2 border-sky-400 border-t-transparent rounded-full"></div>
-              <span id="taskMsg" class="text-slate-200 font-medium">Đang xử lý...</span>
+            <div class="flex items-center gap-2 min-w-0 pr-2">
+              <div id="taskSpinner" class="shrink-0">
+                <div class="animate-spin w-3.5 h-3.5 border-2 border-sky-400 border-t-transparent rounded-full"></div>
+              </div>
+              <span id="taskMsg" class="text-slate-200 font-medium truncate">Đang xử lý...</span>
             </div>
-            <span id="taskPct" class="text-sky-400 font-bold">0%</span>
+            <div class="flex items-center gap-3 shrink-0">
+              <span id="taskTimer" class="text-[11px] font-mono text-slate-400">⏱️ 00:00</span>
+              <span id="taskPct" class="text-sky-400 font-bold font-mono text-sm">0%</span>
+            </div>
           </div>
-          <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-            <div id="taskBar" class="h-full bg-sky-500 transition-all duration-300" style="width: 5%"></div>
+          <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden p-0.5">
+            <div id="taskBar" class="h-full bg-gradient-to-r from-sky-500 via-indigo-500 to-sky-400 rounded-full transition-all duration-300" style="width: 5%"></div>
+          </div>
+          <!-- Error details box if failed -->
+          <div id="taskErrorBox" class="hidden text-xs bg-red-950/70 border border-red-500/40 rounded-lg p-2.5 text-red-200 space-y-1">
+            <div class="flex items-center justify-between font-semibold text-red-400">
+              <span>⚠️ Đã có lỗi xảy ra:</span>
+              <button type="button" onclick="document.getElementById('globalTaskBox').classList.add('hidden')" class="text-slate-400 hover:text-white text-xs">✕ Đóng</button>
+            </div>
+            <p id="taskErrorText" class="font-mono text-[11px] break-words text-red-300"></p>
           </div>
         </div>
 
@@ -1294,28 +1307,75 @@ Nội dung SRT cần dịch:
       const msgEl = document.getElementById("taskMsg");
       const pctEl = document.getElementById("taskPct");
       const barEl = document.getElementById("taskBar");
+      const timerEl = document.getElementById("taskTimer");
+      const spinnerEl = document.getElementById("taskSpinner");
+      const errorBox = document.getElementById("taskErrorBox");
+      const errorText = document.getElementById("taskErrorText");
+
+      // Reset state ban đầu
       box.classList.remove("hidden");
+      if (errorBox) errorBox.classList.add("hidden");
+      if (spinnerEl) spinnerEl.innerHTML = '<div class="animate-spin w-3.5 h-3.5 border-2 border-sky-400 border-t-transparent rounded-full"></div>';
+      if (pctEl) {
+        pctEl.className = "text-sky-400 font-bold font-mono text-sm";
+        pctEl.textContent = "0%";
+      }
+      if (barEl) {
+        barEl.className = "h-full bg-gradient-to-r from-sky-500 via-indigo-500 to-sky-400 rounded-full transition-all duration-300";
+        barEl.style.width = "5%";
+      }
+      if (timerEl) timerEl.textContent = "⏱️ 00:00";
+      if (msgEl) msgEl.textContent = "Đang khởi tạo...";
+
+      const startTime = Date.now();
 
       const timer = setInterval(async () => {
         try {
+          // Cập nhật đồng hồ thời gian trôi qua
+          const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+          const mm = String(Math.floor(elapsedSec / 60)).padStart(2, "0");
+          const ss = String(elapsedSec % 60).padStart(2, "0");
+          if (timerEl) timerEl.textContent = `⏱️ ${mm}:${ss}`;
+
           const res = await fetch(`/api/task/${taskId}`);
           if (!res.ok) return;
           const t = await res.json();
-          msgEl.textContent = t.message || "Đang xử lý...";
-          pctEl.textContent = `${t.progress || 0}%`;
-          barEl.style.width = `${t.progress || 5}%`;
+          if (msgEl) msgEl.textContent = t.message || "Đang xử lý...";
+          if (pctEl) pctEl.textContent = `${t.progress || 0}%`;
+          if (barEl) barEl.style.width = `${Math.max(5, Math.min(100, t.progress || 5))}%`;
 
           if (t.status === "done") {
             clearInterval(timer);
-            setTimeout(() => box.classList.add("hidden"), 1200);
+            if (spinnerEl) spinnerEl.innerHTML = '<span class="text-emerald-400 font-bold text-sm">✅</span>';
+            if (barEl) {
+              barEl.className = "h-full bg-emerald-500 rounded-full transition-all duration-300";
+              barEl.style.width = "100%";
+            }
+            if (pctEl) pctEl.textContent = "100%";
+            if (msgEl) msgEl.textContent = t.message || "Hoàn tất!";
+            setTimeout(() => {
+              box.classList.add("hidden");
+            }, 1600);
             if (onDone) onDone(t.result);
           } else if (t.status === "error") {
             clearInterval(timer);
-            box.classList.add("hidden");
+            if (spinnerEl) spinnerEl.innerHTML = '<span class="text-rose-400 font-bold text-sm">❌</span>';
+            if (barEl) {
+              barEl.className = "h-full bg-rose-500 rounded-full transition-all duration-300";
+            }
+            if (pctEl) {
+              pctEl.className = "text-rose-400 font-bold font-mono text-sm";
+              pctEl.textContent = "Lỗi";
+            }
+            if (msgEl) msgEl.textContent = "Thất bại!";
+            if (errorBox && errorText) {
+              errorText.textContent = t.error || t.message || "Đã xảy ra sự cố trong quá trình xử lý.";
+              errorBox.classList.remove("hidden");
+            }
             showToast("❌ Lỗi: " + (t.error || t.message));
           }
         } catch (e) {
-          console.error(e);
+          console.error("Lỗi khi kiểm tra trạng thái task:", e);
         }
       }, 1000);
     }
@@ -1552,8 +1612,9 @@ Nội dung SRT cần dịch:
 
       const btn = event.target;
       const oldText = btn.textContent;
-      btn.textContent = "Đang dịch...";
+      btn.textContent = "⏳ Đang dịch tự động...";
       btn.disabled = true;
+      showToast("⚡ Đang kết nối Google API để dịch phụ đề...");
 
       try {
         const res = await fetch("/api/translate-auto", {
