@@ -570,19 +570,68 @@ async def api_extract_sub(req: ExtractSubReq):
 
 
 def google_translate_text(text: str, sl: str = "zh-CN", tl: str = "vi") -> str:
-    """Dịch nhanh qua Google Translate Mobile (kế thừa từ pyvideotrans/_google.py)."""
+    """
+    Dịch văn bản qua các cổng Google Translate API miễn phí (GTX / Clients5)
+    kèm cơ chế tự động xoay vòng endpoint, retry và fallback chống lỗi HTTP 429 Too Many Requests.
+    """
+    if not text or not text.strip():
+        return ""
+
+    import html
+
+    endpoints = [
+        # 1. Google Translate GTX API (chuẩn nhất, hỗ trợ văn bản nhiều dòng)
+        lambda q: (
+            f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={sl}&tl={tl}&dt=t&q={q}",
+            lambda resp_bytes: "".join([p[0] for p in json.loads(resp_bytes.decode("utf-8"))[0] if p and p[0]])
+        ),
+        # 2. Chrome Extension API (client=dict-chrome-ex)
+        lambda q: (
+            f"https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl={sl}&tl={tl}&q={q}",
+            lambda resp_bytes: (
+                json.loads(resp_bytes.decode("utf-8"))[0]
+                if isinstance(json.loads(resp_bytes.decode("utf-8")), list)
+                else str(json.loads(resp_bytes.decode("utf-8")))
+            )
+        ),
+        # 3. Google Translate Mobile Web (fallback)
+        lambda q: (
+            f"https://translate.google.com/m?sl={sl}&tl={tl}&hl={tl}&q={q}",
+            lambda resp_bytes: (
+                html.unescape(re.search(r'<div\s+class="result-container">([^<]+?)</div>', resp_bytes.decode("utf-8", errors="ignore")).group(1).strip())
+                if re.search(r'<div\s+class="result-container">([^<]+?)</div>', resp_bytes.decode("utf-8", errors="ignore"))
+                else ""
+            )
+        ),
+    ]
+
     q = urllib.parse.quote(text)
-    url = f"https://translate.google.com/m?sl={sl}&tl={tl}&hl={tl}&q={q}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "*/*",
     }
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        html_str = resp.read().decode("utf-8", errors="ignore")
-    m = re.search(r'<div\s+class="result-container">([^<]+?)</div>', html_str)
-    if m:
-        import html
-        return html.unescape(m.group(1).strip())
+
+    last_error = None
+    for endpoint_fn in endpoints:
+        url, parser = endpoint_fn(q)
+        for attempt in range(1, 3):
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    raw_bytes = resp.read()
+                    res_text = parser(raw_bytes)
+                    if res_text and res_text.strip():
+                        return res_text.strip()
+            except urllib.error.HTTPError as e:
+                last_error = e
+                if e.code == 429:
+                    time.sleep(0.4 * attempt)
+                    break
+                time.sleep(0.3)
+            except Exception as e:
+                last_error = e
+                time.sleep(0.3)
+
     return text
 
 
@@ -618,7 +667,7 @@ async def api_translate_auto(req: AutoTranslateReq):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Lỗi gọi LLM API: {e}")
 
-    # Dịch bằng Google Translate theo cụm để nhanh và giữ ngữ cảnh
+    # Dịch bằng Google Translate theo cụm để nhanh, chuẩn xác và không bị lệch dòng
     parsed = []
     for b in blocks:
         lines = [l.strip() for l in b.strip().split("\n") if l.strip()]
@@ -631,11 +680,31 @@ async def api_translate_auto(req: AutoTranslateReq):
     translated_lines = []
     for i in range(0, len(parsed), batch_size):
         chunk = parsed[i:i + batch_size]
-        joined_zh = "\n".join([item[2] for item in chunk])
-        trans_chunk = google_translate_text(joined_zh).split("\n")
+        tagged_zh = "\n".join([f"[{idx}] {item[2]}" for idx, item in enumerate(chunk)])
+        trans_raw = google_translate_text(tagged_zh)
+
+        extracted_map = {}
+        for line in trans_raw.splitlines():
+            line_str = line.strip()
+            if not line_str:
+                continue
+            m = re.match(r'^\[(\d+)\]\s*(.*)', line_str)
+            if m:
+                extracted_map[int(m.group(1))] = m.group(2).strip()
+
+        trans_lines = trans_raw.splitlines()
         for idx_in_chunk, item in enumerate(chunk):
-            vi_text = trans_chunk[idx_in_chunk].strip() if idx_in_chunk < len(trans_chunk) else item[2]
+            if idx_in_chunk in extracted_map and extracted_map[idx_in_chunk]:
+                vi_text = extracted_map[idx_in_chunk]
+            elif idx_in_chunk < len(trans_lines) and trans_lines[idx_in_chunk].strip():
+                vi_text = re.sub(r'^\[\d+\]\s*', '', trans_lines[idx_in_chunk].strip())
+            else:
+                vi_text = item[2]
             translated_lines.append(f"{item[0]}\n{item[1]}\n{vi_text}\n")
+
+        # Pacing nhỏ (0.2s) giữa các batch chống rate limit
+        if i + batch_size < len(parsed):
+            await asyncio.sleep(0.2)
 
     return {"vi_srt": "\n".join(translated_lines)}
 
